@@ -1,0 +1,12 @@
+Source: ros-rolling-rko-lio
+Section: misc
+Priority: optional
+Maintainer: Meher Malladi <rm.meher97@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-rolling-ament-cmake, ros-rolling-geometry-msgs, ros-rolling-nav-msgs, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-rosbag2-cpp, ros-rolling-rosbag2-storage, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-tf2, ros-rolling-tf2-ros, ros-rolling-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-rolling-rko-lio
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-geometry-msgs, ros-rolling-nav-msgs, ros-rolling-rclcpp, ros-rolling-rclcpp-components, ros-rolling-rosbag2-cpp, ros-rolling-rosbag2-storage, ros-rolling-sensor-msgs, ros-rolling-std-msgs, ros-rolling-tf2, ros-rolling-tf2-ros, ros-rolling-ros-workspace
+Description: A Robust Approach for LiDAR-Inertial Odometry Without Sensor-Specific Modelling
