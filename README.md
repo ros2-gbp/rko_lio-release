@@ -1,221 +1,98 @@
-<div align="center">
-  <h1>RKO LIO - LiDAR-Inertial Odometry<br />Without Sensor-Specific Modelling</h1>
-</div>
+# RKO LIO - LiDAR-Inertial Odometry
 
-<p align="center">
-ROS Distros:
-<br />
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_humble.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_humble.yaml/badge.svg?branch=master" alt="Humble" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_jazzy.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_jazzy.yaml/badge.svg?branch=master" alt="Jazzy" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_kilted.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_kilted.yaml/badge.svg?branch=master" alt="Kilted" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_rolling.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/ros_build_rolling.yaml/badge.svg?branch=master" alt="Rolling" /></a>
-</p>
+Supported ROS Distros: Humble, Jazzy, Kilted and Rolling.
 
-<p align="center">
-Python Bindings:
-<br />
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2204.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2204.yaml/badge.svg?branch=master" alt="Ubuntu 22.04" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2204_arm.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2204_arm.yaml/badge.svg?branch=master" alt="Ubuntu 22.04 ARM" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2404.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2404.yaml/badge.svg?branch=master" alt="Ubuntu 24.04" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2404_arm.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_ubuntu_2404_arm.yaml/badge.svg?branch=master" alt="Ubuntu 24.04 ARM" /></a>
-<br />
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_macos_14.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_macos_14.yaml/badge.svg?branch=master" alt="macOS 14" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_macos_15.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_macos_15.yaml/badge.svg?branch=master" alt="macOS 15" /></a>
-<br />
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_windows_2022.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_windows_2022.yaml/badge.svg?branch=master" alt="Windows 2022" /></a>
-<a href="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_windows_11_arm.yaml"><img src="https://github.com/PRBonn/rko_lio/actions/workflows/python_bindings_windows_11_arm.yaml/badge.svg?branch=master" alt="Windows 11 ARM" /></a>
-</p>
+## Setup
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=NNpzXdf9XmU">
-    <img src="https://raw.githubusercontent.com/PRBonn/rko_lio/refs/heads/master/docs/example_multiple_platforms.png" alt="Visualization of odometry system running on data from four different platforms in four different environments" />
-  </a>
-  <br />
-  <em>Four different platforms, four different environments, one odometry system</em>
-</p>
+### Build from source
 
-## Quick Start
+Our system dependencies are:
+- CMake, ROS environment
+- Optionally: Eigen, Sophus, nlohmann_json, TBB, Bonxai (please see [build.md](../docs/build.md) for more details)
 
-### Python
-
-In case you already have a rosbag (ROS1 or ROS2) which contains a TF tree, you can inspect the results of our odometry system with the following two steps
+Clone the repository into a colcon workspace's `src`. From the workspace folder, you can then
 
 ```bash
-pip install rko_lio rosbags rerun-sdk
-```
-
-`rko_lio` is our odometry package, `rosbags` is required for using our rosbag dataloader, and `rerun-sdk` is what we use for our optional visualizer.
-Next, run
-
-```bash
-rko_lio -v /path/to/rosbag_folder # <- has to be a directory! with either *.bag files or metadata.yaml from ROS2
-```
-
-and you should be good to go!
-
-<details>
-<summary><b>Click here for some more details on how the above works and how to use RKO LIO!</b></summary>
-<br />
-
-The `-v` flag enables visualization.
-
-You can specify a dataloader to use with `-d`, but if you don't, we try to guess the format based on the layout of the data.
-
-Our rosbag dataloader works with either ROS1 or ROS2 bags.
-Place split ROS1 bags in a single folder and pass the folder as the data path.
-Note that we don't support running RKO LIO on partial or incomplete bags, though you can try (and maybe raise an issue if you think we should support this).
-ROS2 especially will need a `metadata.yaml` file.
-
-By default, we assume there is just one IMU topic and one LiDAR topic in the bag, in which case we automatically pick up the topic names and proceed further.
-If there are multiple topics per sensor, you will be prompted to select one via the `--imu` or `--lidar` flags, which you can pass to `rko_lio`.
-
-Next, we assume there is a (static) TF tree in the bag.
-If so, we take the frame ids from the message topics we just picked up, build a static TF tree, and then query it for the extrinsic from IMU to LiDAR.
-Our odometry estimates the robot pose with respect to a base frame, and by default, we assume the LiDAR frame to be the base frame.
-If you would like to use a different frame, you can pass the frame id with `--base_frame` (note the other options available with `--help`).
-The TF tree will be queried for the appropriate transformations (if they exist in the bag!).
-
-In case there is no TF tree in the bag, then you will have to manually specify the extrinsics for IMU to base frame and LiDAR to base frame, as these two are **required** parameters.
-Set one of the extrinsics to identity if you want that one to be the base frame (you will still have to specify both parameters).
-You can specify the extrinsics via a config YAML file with the keys `extrinsic_imu2base_quat_xyzw_xyz` and `extrinsic_lidar2base_quat_xyzw_xyz`.
-
-You can dump a config with all the options set to default values by running `rko_lio --dump_config`.
-Modify as you require, and pass this file to `rko_lio` using the `-c` flag.
-Please check `python/config` in the GitHub repository for example configurations.
-
-An example invocation would then be
-
-```bash
-# the config should have the sensor extrinsics if the rosbag doesn't
-rko_lio -v -c config.yaml --imu imu_topic --lidar lidar_topic /path/to/rosbag_folder
-```
-
-For all possible CLI flags, please check `rko_lio --help`.
-
-</details>
-
-For more install and usage instructions of our python interface, please refer to the [python readme](/python/README.md#rko_lio---python-bindings), [config.md](/docs/config.md), and [data.md](/docs/data.md).
-
-The python interface to our system can be convenient to investigate recorded data offline as you don't need to setup a ROS environment first.
-
-<details>
-<summary><b>But please prefer the ROS version over the python version if you can!</b></summary>
-<br />
-
-The ROS version is the intended way to use our odometry system on a robot.
-The ROS version also has better performance mainly due to how we read incoming data.
-Without getting into details, if you can, you should prefer using the ROS version.
-For offline use, we provide a way to directly inspect and run our odometry on recorded rosbags (see offline mode in [ROS usage](/ros/README.md#usage)), which should be preferred over the python dataloader.
-The python interface is merely meant to be a convenience.
-
-</details>
-
-### ROS2
-
-> We are working on getting the odometry package into the ROS index, so you can install it using system package managers instead of building from source.
-
-<details>
-<summary><b>Here's a ROS2 quick start!</b></summary>
-<br />
-
-Clone the repository into your ROS workspace and then
-
-```bash
-# we use ninja to build by default
 colcon build --packages-select rko_lio # --symlink-install --event-handlers console_direct+
 ```
 
-To launch the odometry node:
+We provide a `colcon.pkg` [file](colcon.pkg) which defines a default CMake configuration.
+Details from [build.md](../docs/build.md) apply here, but most importantly we have `CMAKE_BUILD_TYPE=Release` and `RKO_LIO_FETCH_CONTENT_DEPS=ON` by default.
+The last option handles our optional dependencies automatically.
+
+In case you'd like to change the build type or provide our optional dependencies yourself, please modify `colcon.pkg` manually. 
+
+> I'd earlier assumed one could override colcon.pkg arguments via --cmake-args when invoking colcon, but this doesn't seem to be the case. If anyone knows a fix, please open an issue or PR!
+
+Also consider using `Ninja` as a generator to speed up builds instead of `Make`.
+If you do use Make, make sure (pun intended) to parallelize the build.
+
+## Usage
+
+We provide an online node component, a standalone online node and an offline node.
+
+The offline node provides a way to directly read data from a rosbag, instead of the usual pattern of playing the bag with `ros2 bag play`.
+
+Both nodes can be launched via the `odometry.launch.py` [launch file](launch/odometry.launch.py), with the different modes being specified by the `mode` argument (the default is `online`).
+
+Check all available configuration options for the launch file by running
 
 ```bash
-ros2 launch rko_lio odometry.launch.py # config_file:=/path/to/a/config.yaml rviz:=true
+ros2 launch rko_lio odometry.launch.py -s
 ```
 
-Note that we have some [default build configuration options](ros/colcon.pkg) which should automatically get picked up by colcon.
-We have a few dependencies, but as long as these defaults apply, the package should build without any further consideration.
-If you encounter any issues, please check [docs/build.md](docs/build.md) for further details or open an issue afterwards.
+That will also provide additional documentation about the different parameters.
+For some additional details regarding the odometry parameters and data itself, please refer to [config.md](../docs/config.md) and [data.md](../docs/data.md).
+ROS-specific parameters are covered here.
 
-</details>
+At minimum, you'll need to specify the `lidar_topic`, `imu_topic` and `base_frame` parameters.
 
-Please refer to the [ROS readme](/ros/README.md) for further ROS-specific details.
+You can define all parameters in a config file and pass it with the launch argument `config_file:=/path`.
+Please note that we don't modify the path you provide in any way.
 
-## About
+If your TF tree is well defined, i.e., it exists and the message frame ids match the frame ids in the TF tree (i've seen both conditions fail), then the sensor frame ids are picked up from the topics and the extrinsics via TF lookup.
+Otherwise you'll need to either specify just the frame ids (if there's a mismatch), or specify the extrinsics via `extrinsic_lidar2base_quat_xyzw_xyz` written as quaternion (xyzw) and translation (xyz) in a list (only supported via a config file).
+Similarly for the IMU to base as `extrinsic_imu2base_quat_xyzw_xyz`.
+But really, if you have a TF problem, just fix it instead.
 
-RKO LIO is a LiDAR-inertial odometry system that is by design simple to deploy on different sensor configurations and robotic platforms with as minimal a change in configuration as necessary.
+`config/default.yaml` specifies the default set of parameters explicitly, and also leaves some placeholders you can modify to pass the `lidar_topic` and similar.
 
-We have no restriction on which LiDAR you can use, and you can do so without changing any config (we've tested Velodyne, Ouster, Hesai, Livox, Robosense, Aeva sensors).
-For using an IMU, we require only the accelerometer and gyroscope readings, the bare minimum.
-You don't need to look up manufacturer spec sheets to provide noise specifications, etc.
+Please note that the parameter definitions from the CLI will override those provided in a config file.
 
-All you need to provide is the extrinsic transformation between the IMU and LiDAR and you can start using our system for your LiDAR-inertial odometry needs!
+You can enable rviz visualization by passing `rviz:=true` which launches an rviz window simultaneously using the default rviz config file in `config/default.rviz`.
 
-For a brief demo of our odometry on data from different platforms, click below for a (YouTube) video:
+An example full invocation with rviz can look like this
 
-[![Thumbnail](https://img.youtube.com/vi/NNpzXdf9XmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=NNpzXdf9XmU)
-
-## A note on transformations
-
-It bears mentioning here our convention for specifying sensor extrinsics, the one parameter we do require you to provide.
-
-Throughout this package, we refer to transformations using `transform_<from-frame>_to_<to-frame>` or `transform_<from-frame>2<to-frame>`.
-
-By this, we mean a transformation that converts a vector expressed in the `<from-frame>` coordinate system to the `<to-frame>` coordinate system.
-
-Mathematically, this translates to:
-
-$$
-\mathbf{v}^{\text{to}} = {}^{\text{to}} \mathbf{T}_{\text{from}}  \mathbf{v}^{\text{from}}
-$$
-
-The superscript on the vector indicates the frame in which the vector is expressed, and $${}^{\text{to}} \mathbf{T}_{\text{from}}$$ corresponds to `transform_<from-frame>_to_<to-frame>`.
-
-## License
-
-This project is free software made available under the MIT license. For details, see the [LICENSE](LICENSE) file.
-
-## Citation
-
-If you found this work useful, please consider citing our [paper](https://arxiv.org/abs/2509.06593):
-
-```bib
-@article{malladi2025arxiv,
-  author      = {M.V.R. Malladi and T. Guadagnino and L. Lobefaro and C. Stachniss},
-  title       = {A Robust Approach for LiDAR-Inertial Odometry Without Sensor-Specific Modeling},
-  journal     = {arXiv preprint},
-  year        = {2025},
-  volume      = {arXiv:2509.06593},
-  url         = {https://arxiv.org/pdf/2509.06593},
-}
+```bash
+ros2 launch rko_lio odometry.launch.py \
+    config_file:=/path/to/config/file \
+    rviz:=true
 ```
 
-## Platforms and Sensors Tested
+### Published topics
 
-RKO LIO has been tested on a variety of platforms with different sensor setups:
+- `/rko_lio/odometry`: Odometry topic, the name can be modified using the `odom_topic` parameter. This also includes the twist of the `base_frame` expressed in `base_frame` coordinates. This twist is estimated from the lidar scan registration. A TF is also simultaneously published from the `base_frame` to the `odom_frame`. Please note the parameter `invert_odom_tf` in case your TF configuration requires this (you're running multiple odometries or some other complicated setup).
+- `/rko_lio/frame`: The input lidar scan deskewed using the IMU data. Only published if `publish_deskewed_scan:=true`.
+- `/rko_lio/local_map`: The local map the odometry maintains is published at a set frequency given by `publish_map_after` (seconds), and only if `publish_local_map:=true`.
+- `/rko_lio/linear_acceleration`: Linear acceleration of the `base_frame` expressed in `base_frame` coordinates. Note that this acceleration can be quite noisy, as it is essentially a double time derivative of the pose update from the lidar scan registration (similar to the twist/velocity). Only published if `publish_lidar_acceleration:=true`.
 
-- Car: Ouster OS1-128; OS2-128, Livox Avia, Aeva Aeries II (HeLiPR dataset)
-- Backpack: Hesai XT32, QT32, QT64 (DigiForests dataset); QT128
-- Forestry Harvester: Hesai XT32
-- Quadruped: Velodyne VLP-16 (Leg-KILO dataset)
-- Bicycle: Livox Avia (thanks to @rlabs-oss, [YouTube video](https://www.youtube.com/watch?v=dKDGIAu628w))
+### Offline node
 
-If you've tested RKO LIO on any other platform or sensor configuration, I'd be glad to list it here.
-Please reach out by [email](mailto:rm.meher97@gmail.com) or open an issue!
+As mentioned before, you can use the offline node to read a bag directly and run the odometry on it at the same time.
 
-## RA-L Submission
+Specify `mode:=offline` as the default is `online`.
 
-You can check out the branch `ral_submission` for the version of the code used for submission to RA-L.
-Please note that that branch is meant to be an as-is reproduction of the code used during submission and is not supported.
-The `master` and release versions are vastly improved, supported, and are the recommended way to use this system.
+Pass the `bag_path:=` parameter to the launch file, which should be a folder containing the .db3 or .mcap or other ROS supported formats (you probably need the respective plugins).
 
-## Acknowledgements
+The offline node additionally publishes a convenient topic `/rko_lio/bag_progress` which you can use to monitor bag playing progress.
+It has two values, a percentage completion and an ETA.
 
-<details>
-<summary>KISS-ICP, Kinematic-ICP, Bonxai, PlotJuggler, Rerun</summary>
+An example invocation would then look like
 
-This package is inspired by and would not be possible without the work of [KISS-ICP](https://github.com/PRBonn/kiss-icp) and [Kinematic-ICP](https://github.com/PRBonn/kinematic-icp).
-Additionally, we use and rely heavily on, either in the package itself or during development, [Bonxai](https://github.com/facontidavide/Bonxai), [PlotJuggler](https://github.com/facontidavide/PlotJuggler), [Rerun](https://github.com/rerun-io/rerun), and of course ROS itself.
-
-A special mention goes out to [Rerun](https://rerun.io/) for providing an extremely easy-to-use but highly performative visualization system.
-Without this, I probably would not have made a python interface at all.
-
-</details>
+```bash
+ros2 launch rko_lio odometry.launch.py \
+    config_file:=/path/to/config/file \
+    rviz:=true \
+    mode:=offline \
+    bag_path:=/path/to/rosbag/directory
+```
