@@ -1,0 +1,12 @@
+name: Humble
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+jobs:
+  build_ros_humble:
+    uses: ./.github/workflows/ros_build_reusable.yaml
+    with:
+      ros_distro: humble
+      container_image: alexsilener/ros_humble_desktop_cmake_328_ninja
