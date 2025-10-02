@@ -23,43 +23,51 @@
 cmake_minimum_required(VERSION 3.28)
 project(rko_lio LANGUAGES CXX)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/dependencies.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/dependencies.cmake)
 
-# general dependencies
 find_package(Eigen3 3.4 REQUIRED CONFIG)
 find_package(Sophus REQUIRED CONFIG)
+find_package(TBB REQUIRED CONFIG)
+find_package(nlohmann_json REQUIRED CONFIG)
+find_package(Bonxai REQUIRED CONFIG)
 
-# ROS dependencies
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(rosbag2_cpp REQUIRED)
-find_package(rosbag2_storage REQUIRED)
-find_package(rclcpp_components REQUIRED)
+add_subdirectory(cpp/rko_lio/core)
 
-add_subdirectory(rko_lio)
+option(RKO_LIO_BUILD_ROS "Build the ROS wrapper for RKO LIO" ON)
+find_package(ament_cmake QUIET)
 
-# ament macros cannot be in a CMake subdirectory, even the component stuff. such
-# a pain to debug
-rclcpp_components_register_node(
-  online_node_component
-  PLUGIN
-  "rko_lio::ros::OnlineNode"
-  EXECUTABLE
-  online_node)
+if(RKO_LIO_BUILD_ROS AND ament_cmake_FOUND)
+  find_package(rclcpp REQUIRED CONFIG)
+  find_package(std_msgs REQUIRED CONFIG)
+  find_package(tf2 REQUIRED CONFIG)
+  find_package(tf2_ros REQUIRED CONFIG)
+  find_package(sensor_msgs REQUIRED CONFIG)
+  find_package(nav_msgs REQUIRED CONFIG)
+  find_package(geometry_msgs REQUIRED CONFIG)
+  find_package(rosbag2_cpp REQUIRED CONFIG)
+  find_package(rosbag2_storage REQUIRED CONFIG)
+  find_package(rclcpp_components REQUIRED CONFIG)
 
-install(
-  TARGETS online_node_component offline_node
-  EXPORT rko_lioTargets
-  RUNTIME DESTINATION lib/${PROJECT_NAME})
+  add_subdirectory(ros/rko_lio)
 
-install(DIRECTORY config launch DESTINATION share/rko_lio)
+  # ament macros cannot be in a CMake subdirectory, even rclcpp
+  rclcpp_components_register_node(
+    online_node_component
+    PLUGIN
+    "rko_lio::ros::OnlineNode"
+    EXECUTABLE
+    online_node)
 
-ament_export_targets(rko_lioTargets)
+  install(
+    TARGETS online_node_component offline_node
+    EXPORT rko_lioTargets
+    RUNTIME DESTINATION lib/${PROJECT_NAME})
 
-ament_package()
+  install(DIRECTORY ros/config ros/launch DESTINATION share/rko_lio)
+
+  ament_export_targets(rko_lioTargets)
+
+  ament_package()
+else()
+  message(STATUS "Not building RKO LIO ROS wrapper.")
+endif()
