@@ -24,15 +24,14 @@ add_subdirectory(ros_utils)
 
 add_library(rko_lio.ros STATIC)
 add_library(rko_lio::ros ALIAS rko_lio.ros)
-target_sources(
+compat_target_sources(
   rko_lio.ros
   PRIVATE node.cpp
-  PUBLIC FILE_SET
-         HEADERS
-         FILES
-         ../rko_lio/node.hpp
-         BASE_DIRS
-         ..)
+  PUBLIC
+  FILE_SET
+  HEADERS
+  FILES ../rko_lio/node.hpp
+  BASE_DIRS ..)
 target_link_libraries(
   rko_lio.ros
   PUBLIC rko_lio::ros_utils
@@ -50,9 +49,11 @@ target_link_libraries(
          rko_lio::core
          Sophus::Sophus
          Eigen3::Eigen)
+set_target_properties(rko_lio.ros PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(offline_node offline_node.cpp)
 target_link_libraries(offline_node PRIVATE rko_lio::ros)
+set_target_properties(offline_node PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(online_node_component SHARED online_node.cpp)
 target_link_libraries(
