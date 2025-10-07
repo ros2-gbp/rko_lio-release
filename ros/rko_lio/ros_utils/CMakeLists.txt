@@ -22,21 +22,20 @@
 
 add_library(rko_lio.ros_utils STATIC)
 add_library(rko_lio::ros_utils ALIAS rko_lio.ros_utils)
-target_sources(
+compat_target_sources(
   rko_lio.ros_utils
   PRIVATE point_cloud_read.cpp point_cloud_write.cpp rosbag_utils.cpp
-  PUBLIC FILE_SET
-         HEADERS
-         FILES
-         ../../rko_lio/ros_utils/point_cloud_read.hpp
-         ../../rko_lio/ros_utils/point_cloud_write.hpp
-         ../../rko_lio/ros_utils/ros_utils.hpp
-         ../../rko_lio/ros_utils/ros_vectors.hpp
-         ../../rko_lio/ros_utils/rosbag_utils.hpp
-         ../../rko_lio/ros_utils/time.hpp
-         ../../rko_lio/ros_utils/transforms.hpp
-         BASE_DIRS
-         ../..)
+  PUBLIC
+  FILE_SET
+  HEADERS
+  FILES ../../rko_lio/ros_utils/point_cloud_read.hpp
+        ../../rko_lio/ros_utils/point_cloud_write.hpp
+        ../../rko_lio/ros_utils/ros_utils.hpp
+        ../../rko_lio/ros_utils/ros_vectors.hpp
+        ../../rko_lio/ros_utils/rosbag_utils.hpp
+        ../../rko_lio/ros_utils/time.hpp
+        ../../rko_lio/ros_utils/transforms.hpp
+  BASE_DIRS ../..)
 target_link_libraries(
   rko_lio.ros_utils
   PUBLIC # ros deps
@@ -51,4 +50,5 @@ target_link_libraries(
          # ros deps end
          Sophus::Sophus
          Eigen3::Eigen)
+set_target_properties(rko_lio.ros_utils PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # TODO: add the ros_utils as a library export target to enable reuse
