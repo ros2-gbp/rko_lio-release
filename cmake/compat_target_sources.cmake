@@ -20,30 +20,30 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_library(rko_lio.core STATIC)
-add_library(rko_lio::core ALIAS rko_lio.core)
-compat_target_sources(
-  rko_lio.core
-  PRIVATE lio.cpp sparse_voxel_grid.cpp voxel_down_sample.cpp
-          process_timestamps.cpp
-  PUBLIC
-  FILE_SET
-  HEADERS
-  FILES ../../rko_lio/core/lio.hpp
-        ../../rko_lio/core/process_timestamps.hpp
-        ../../rko_lio/core/profiler.hpp
-        ../../rko_lio/core/sparse_voxel_grid.hpp
-        ../../rko_lio/core/util.hpp
-        ../../rko_lio/core/voxel_down_sample.hpp
-  BASE_DIRS ../..)
-target_link_libraries(
-  rko_lio.core
-  PRIVATE nlohmann_json::nlohmann_json TBB::tbb
-  PUBLIC bonxai_core Sophus::Sophus Eigen3::Eigen)
-target_compile_features(rko_lio.core PUBLIC cxx_std_20)
-set_target_properties(rko_lio.core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# compat_target_sources macro: backward-compatible target_sources with FILE_SET
+# for CMake < 3.23. Adds private sources normally, adds include directories
+# fallback using BASE_DIRS
+macro(compat_target_sources target)
+  set(options)
+  set(oneValueArgs BASE_DIRS)
+  set(multiValueArgs
+      PRIVATE
+      PUBLIC
+      FILE_SET
+      HEADERS
+      FILES)
 
-# install is a problem because at least Bonxai is always fetch-contented, and
-# that becomes a problem for the export target set. we'd have to manually export
-# bonxai ourselves, which I would rather do as a patch or PR to upstream.
-# therefore TODO
+  cmake_parse_arguments(
+    CTS
+    "${options}"
+    "${oneValueArgs}"
+    "${multiValueArgs}"
+    ${ARGN})
+
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.23")
+    target_sources(${target} ${ARGN})
+  else()
+    target_sources(${target} PRIVATE ${CTS_PRIVATE})
+    target_include_directories(${target} PUBLIC "${CTS_BASE_DIRS}")
+  endif()
+endmacro()
