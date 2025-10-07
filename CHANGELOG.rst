@@ -2,6 +2,25 @@
 Changelog for package rko_lio
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.6 (2025-10-07)
+------------------
+* make fPIC a property target ON instead of a global build flag
+* drop cmake min version to 3.22.0
+* clean up bonxai finding and mocking a bit
+* force include bonxai code when not fetching
+* Contributors: Meher Malladi
+
+0.1.5 (2025-10-04)
+------------------
+* Drop cmake min version to 3.22.1 to support ros humble builds with default toolchains  (`#52 <https://github.com/PRBonn/rko_lio/issues/52>`_)
+  * mock a find package file if cmake below version 3.24
+  * different sophus version compat for older cmake
+  * add compat target sources for cmake < 3.23
+  * missing include fix
+  * cmake policy to suppress warning on the older cmake
+  * fix the bonxai fetch problem for ubuntu 22.04 isolated builds
+* Contributors: Meher Malladi
+
 0.1.4 (2025-10-04)
 ------------------
 * Drop ros cmake min version to 3.26.5.  (`#50 <https://github.com/PRBonn/rko_lio/issues/50>`_)

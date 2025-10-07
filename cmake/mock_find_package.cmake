@@ -1,5 +1,3 @@
-# MIT License
-#
 # Copyright (c) 2025 Meher V.R. Malladi.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,30 +18,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_library(rko_lio.core STATIC)
-add_library(rko_lio::core ALIAS rko_lio.core)
-compat_target_sources(
-  rko_lio.core
-  PRIVATE lio.cpp sparse_voxel_grid.cpp voxel_down_sample.cpp
-          process_timestamps.cpp
-  PUBLIC
-  FILE_SET
-  HEADERS
-  FILES ../../rko_lio/core/lio.hpp
-        ../../rko_lio/core/process_timestamps.hpp
-        ../../rko_lio/core/profiler.hpp
-        ../../rko_lio/core/sparse_voxel_grid.hpp
-        ../../rko_lio/core/util.hpp
-        ../../rko_lio/core/voxel_down_sample.hpp
-  BASE_DIRS ../..)
-target_link_libraries(
-  rko_lio.core
-  PRIVATE nlohmann_json::nlohmann_json TBB::tbb
-  PUBLIC bonxai_core Sophus::Sophus Eigen3::Eigen)
-target_compile_features(rko_lio.core PUBLIC cxx_std_20)
-set_target_properties(rko_lio.core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+macro(mock_find_package PACKAGE_NAME)
+  message(STATUS "Mocking find_package for ${PACKAGE_NAME}")
+  set(MOCK_CONFIG_DIR "${CMAKE_BINARY_DIR}/cmake-mock-configs")
+  if(NOT EXISTS "${MOCK_CONFIG_DIR}")
+    file(MAKE_DIRECTORY "${MOCK_CONFIG_DIR}")
+  endif()
 
-# install is a problem because at least Bonxai is always fetch-contented, and
-# that becomes a problem for the export target set. we'd have to manually export
-# bonxai ourselves, which I would rather do as a patch or PR to upstream.
-# therefore TODO
+  list(APPEND CMAKE_PREFIX_PATH "${MOCK_CONFIG_DIR}")
+  list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
+  set(CMAKE_PREFIX_PATH
+      "${CMAKE_PREFIX_PATH}"
+      CACHE STRING "Mock config path" FORCE)
+
+  set(MOCK_CONFIG_FILE "${MOCK_CONFIG_DIR}/${PACKAGE_NAME}Config.cmake")
+
+  if(NOT EXISTS "${MOCK_CONFIG_FILE}")
+    file(WRITE "${MOCK_CONFIG_FILE}" "set(${PACKAGE_NAME}_FOUND TRUE)\n")
+  endif()
+endmacro()
+
+macro(mock_find_package_for_older_cmake PACKAGE_NAME)
+  if(NOT CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+    mock_find_package(${PACKAGE_NAME})
+  endif()
+endmacro()
