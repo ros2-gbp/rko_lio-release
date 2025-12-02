@@ -1,3 +1,26 @@
+## rko_lio (humble) - 0.2.0-1
+
+The packages in the `rko_lio` repository were released into the `humble` distro by running `/usr/bin/bloom-release --rosdistro humble rko_lio` on `Tue, 02 Dec 2025 08:15:04 -0000`
+
+The `rko_lio` package was released.
+
+Version of package(s) in repository `rko_lio`:
+
+- upstream repository: https://github.com/PRBonn/rko_lio.git
+- release repository: https://github.com/ros2-gbp/rko_lio-release.git
+- rosdistro version: `0.1.6-1`
+- old version: `0.1.6-1`
+- new version: `0.2.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.13.0`
+- catkin_pkg version: `1.1.0`
+- rosdep version: `0.26.0`
+- rosdistro version: `1.0.1`
+- vcstools version: `0.1.42`
+
+
 ## rko_lio (kilted) - 0.2.0-1
 
 The packages in the `rko_lio` repository were released into the `kilted` distro by running `/usr/bin/bloom-release --rosdistro kilted rko_lio` on `Tue, 02 Dec 2025 08:13:51 -0000`
