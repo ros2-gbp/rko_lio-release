@@ -2,6 +2,74 @@
 Changelog for package rko_lio
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.0 (2025-12-02)
+------------------
+* Fix (core): log proper pose for the first frame if init. phase is on (`#89 <https://github.com/PRBonn/rko_lio/issues/89>`_)
+* chore: bump FetchContent Eigen to 5.0.1 (`#88 <https://github.com/PRBonn/rko_lio/issues/88>`_)
+  Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+* core: minimize TimestampProcessingConfig (`#87 <https://github.com/PRBonn/rko_lio/issues/87>`_)
+  * remove the configs for start and end time thresholds that can be satisfied much simpler by just forcing relative or absolute overrides
+* python: remove unnecessary scan viz (`#85 <https://github.com/PRBonn/rko_lio/issues/85>`_)
+* remove pytest as optional dep, added toml based config (`#83 <https://github.com/PRBonn/rko_lio/issues/83>`_)
+* Rename published_deskewed_cloud to publish_deskewed_scan (`#81 <https://github.com/PRBonn/rko_lio/issues/81>`_)
+* Fix: core - proper second frame pose if initialization off (`#77 <https://github.com/PRBonn/rko_lio/issues/77>`_)
+  * move preproc to its own file and fix the non intialization behaviour
+  * better (but not cross platform-worthy) identity registration testing
+* Update accelerometer data expectation in docs. Clarified accelerometer assumptions
+* core: Configurable lidar timestamp processing (`#74 <https://github.com/PRBonn/rko_lio/issues/74>`_)
+  * thresholds and timestamp processing behaviour is configurable
+  * config modifications to the python side
+  * ros side launch config modified to have more params
+  * docs additions and cleanup
+  * fix the py tests since the api changed
+* update installation instructions and badge formatting. Updated README.md to improve formatting and clarity of installation instructions and dependencies.
+* More CLI options, profiles stats has variance, dumping deskewed scans (`#73 <https://github.com/PRBonn/rko_lio/issues/73>`_)
+  * add the modifications needed to dump the plys when running
+  * add variance to profile stats
+  * python: pybind interval stats, and imu logging in rerun
+  * more cli options, viz improvements a bit
+  * update the cli for dumping deskewed
+  * update the rbl
+* Update README.md. Add ros source build details
+* Folder reorganisation and docs update (`#69 <https://github.com/PRBonn/rko_lio/issues/69>`_)
+  * flatten the directories. massive renaming across the board
+  * docs rework
+  * docs updates
+  * rename the config file so its explicit
+  * fix workflows
+* Core/move logging to wrappers (`#68 <https://github.com/PRBonn/rko_lio/issues/68>`_)
+  * remove logging from core. improve docs
+  * python side now does its own config and traj dumping
+  * nlohmann json is no longer a core requirement. ros only
+  * result dumping on ros side now
+  * make result logging on ros optional. and add launch config for that
+  * use a shutdown callback for ros to dump results
+* Contributors: Anthony Bisulco, Meher Malladi, dependabot[bot]
+
+0.1.7 (2025-10-21)
+------------------
+* python: Update rosbags requirement from to allow 0.11 (`#63 <https://github.com/PRBonn/rko_lio/issues/63>`_)
+  * Update rosbags requirement from <0.11,>=0.10 to >=0.10,<0.12 in /python
+  * Changes to rosbag reader to support older versions and 0.11
+  Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+  Co-authored-by: Meher Malladi <rm.meher97@gmail.com>
+* actions: Bump pypa/cibuildwheel from 3.2.0 to 3.2.1 (`#61 <https://github.com/PRBonn/rko_lio/issues/61>`_)
+  Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+* python: Update typer requirement from <0.20,>=0.19 to >=0.19,<0.21(`#62 <https://github.com/PRBonn/rko_lio/issues/62>`_)
+  Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+* python: Update rerun-sdk version (`#64 <https://github.com/PRBonn/rko_lio/issues/64>`_)
+  Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+* python: pin versions for compatibility (`#60 <https://github.com/PRBonn/rko_lio/issues/60>`_)
+  * add python to dependabot checks
+  * specify upper bounds for pip dependencies
+  * add optional dataloader tests, and add a workflow to install and test
+  * improve the testing a bit
+  * remove the ament cmake find outside of a ros build, as that causes issues on cursed ros setups
+* python: data loader improvements and raw loader overhaul (`#56 <https://github.com/PRBonn/rko_lio/issues/56>`_)
+* docs: overhaul and add a github pages workflow (`#55 <https://github.com/PRBonn/rko_lio/issues/55>`_)
+  essentially a massive overhaul to everything documentation related. we now use rosdocs2, sphinx, doxygen to build docs. and gh-pages-action to deploy to github-pages automatically
+* Contributors: Meher Malladi, dependabot[bot]
+
 0.1.6 (2025-10-07)
 ------------------
 * make fPIC a property target ON instead of a global build flag
