@@ -102,7 +102,7 @@ tracks:
     last_version: 0.2.0
     name: rko_lio
     patches: null
-    release_inc: '1'
+    release_inc: '2'
     release_repo_url: null
     release_tag: v:{version}
     ros_distro: rolling
