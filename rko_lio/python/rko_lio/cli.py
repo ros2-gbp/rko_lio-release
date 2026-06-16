@@ -51,7 +51,7 @@ def dump_config_callback(value: bool):
         from .config import PipelineConfig
 
         with open("config.yaml", "w") as f:
-            yaml.dump(PipelineConfig.default_dict(), f, default_flow_style=False)
+            yaml.dump(PipelineConfig().to_dict(), f, default_flow_style=False)
         info(
             "Default config dumped to config.yaml. Note that the extrinsics are left as an empty list. If you need them, you need to specify them as \[qx, qy, qz, qw, x, y, z]. Delete all the keys you don't need."
         )
@@ -113,12 +113,6 @@ def cli(
         help="Enable Rerun visualization",
         rich_help_panel="Visualisation options",
     ),
-    viz_every_n_frames: int = typer.Option(
-        20,
-        "--viz_frame_skip",
-        help="Publish (rerun) LiDAR information after specified number of frames. A low value will slow down the entire pipeline as logging LiDAR data is expensive.",
-        rich_help_panel="Visualisation options",
-    ),
     rbl_path: Path | None = typer.Option(
         None,
         "--rbl",
@@ -137,9 +131,9 @@ def cli(
         rich_help_panel="Visualisation options",
     ),
     log_results: bool = typer.Option(
-        False,
-        "--log",
-        "-l",
+        True,
+        "--log/--no_log",
+        "-l/-L",
         help="Log trajectory results to disk at 'log_dir' on completion",
         rich_help_panel="Disk logging options",
     ),
@@ -223,6 +217,76 @@ def cli(
     Run RKO_LIO with the selected dataloader and parameters.
     """
 
+    user_config = {}
+    if config_fp:
+        with open(config_fp, "r") as f:
+            import yaml
+
+            user_config.update(yaml.safe_load(f))
+    user_config["log_dir"] = log_dir or user_config.get("log_dir", "results")
+    user_config["run_name"] = run_name or user_config.get("run_name", data_path.name)
+    user_config["dump_deskewed_scans"] = log_results and (
+        dump_deskewed_scans or user_config.get("dump_deskewed_scans", False)
+    )
+    invalid_keys = ["viz"]
+    for key in invalid_keys:
+        if key in user_config:
+            warning(f"{key} specified in config will be ignored.")
+    user_config["viz"] = viz
+
+    from .config import PipelineConfig
+
+    pipeline_config = PipelineConfig.from_dict(user_config)
+
+    from .dataloaders import LidarIMUSequencer, dataloader_factory
+
+    dataloader = LidarIMUSequencer(
+        dataloader_factory(
+            name=dataloader_name,
+            data_path=data_path,
+            sequence=sequence,
+            imu_topic=imu_topic,
+            lidar_topic=lidar_topic,
+            imu_frame_id=imu_frame,
+            lidar_frame_id=lidar_frame,
+            base_frame_id=base_frame,
+            timestamp_config=pipeline_config.timestamps,
+        )
+    )
+    print("Loaded dataloader:", dataloader)
+
+    from .util import transform_to_quat_xyzw_xyz
+
+    if (
+        pipeline_config.extrinsic_imu2base_quat_xyzw_xyz is None
+        or pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz is None
+    ):
+        info("Extrinsics missing or not fully specified in config.")
+        dl_ext_imu2base, dl_ext_lidar2base = dataloader.extrinsics
+        if pipeline_config.extrinsic_imu2base_quat_xyzw_xyz is None:
+            pipeline_config.extrinsic_imu2base_quat_xyzw_xyz = (
+                transform_to_quat_xyzw_xyz(dl_ext_imu2base)
+            )
+        if pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz is None:
+            pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz = (
+                transform_to_quat_xyzw_xyz(dl_ext_lidar2base)
+            )
+
+    if (
+        pipeline_config.extrinsic_imu2base_quat_xyzw_xyz is None
+        or pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz is None
+    ):
+        error_and_exit(
+            "Fatal: Could not obtain required IMU/Lidar extrinsics. Please specify in a config or as part of your data."
+        )
+
+    print("Resolved extrinsics:")
+    print("  IMU to Base:", pipeline_config.extrinsic_imu2base_quat_xyzw_xyz)
+    print(
+        "  Lidar to Base:",
+        pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz,
+    )
+
     if viz:
         try:
             import rerun as rr
@@ -241,83 +305,17 @@ def cli(
                 "Please install rerun with `pip install rerun-sdk` to enable visualization."
             )
 
-    user_config = {}
-    if config_fp:
-        with open(config_fp, "r") as f:
-            import yaml
-
-            user_config.update(yaml.safe_load(f))
-    user_config["log_dir"] = log_dir or user_config.get("log_dir", "results")
-    user_config["run_name"] = run_name or user_config.get("run_name", data_path.name)
-    user_config["dump_deskewed_scans"] = log_results and (
-        dump_deskewed_scans or user_config.get("dump_deskewed_scans", False)
-    )
-    invalid_keys = ["viz", "viz_every_n_frames"]
-    for key in invalid_keys:
-        if key in user_config:
-            warning(f"{key} specified in config will be ignored.")
-    user_config["viz"] = viz
-    user_config["viz_every_n_frames"] = viz_every_n_frames
-
-    from .config import PipelineConfig
-
-    pipeline_config = PipelineConfig(**user_config)
-
-    from .dataloaders import dataloader_factory
-
-    dataloader = dataloader_factory(
-        name=dataloader_name,
-        data_path=data_path,
-        sequence=sequence,
-        imu_topic=imu_topic,
-        lidar_topic=lidar_topic,
-        imu_frame_id=imu_frame,
-        lidar_frame_id=lidar_frame,
-        base_frame_id=base_frame,
-        timestamp_processing_config=pipeline_config.timestamps,
-    )
-    print("Loaded dataloader:", dataloader)
-
-    user_ext_imu2base = pipeline_config.extrinsic_imu2base
-    user_ext_lidar2base = pipeline_config.extrinsic_lidar2base
-    if user_ext_imu2base is None or user_ext_lidar2base is None:
-        info("Extrinsics missing or not fully specified in config.")
-        dl_ext_imu2base, dl_ext_lidar2base = dataloader.extrinsics
-        if user_ext_imu2base is None:
-            pipeline_config.extrinsic_imu2base = dl_ext_imu2base
-        if user_ext_lidar2base is None:
-            pipeline_config.extrinsic_lidar2base = dl_ext_lidar2base
-
-    if (
-        pipeline_config.extrinsic_imu2base is None
-        or pipeline_config.extrinsic_lidar2base is None
-    ):
-        error_and_exit(
-            "Fatal: Could not obtain required IMU/Lidar extrinsics. Please specify in a config or as part of your data."
-        )
-
-    from .util import transform_to_quat_xyzw_xyz
-
-    print("Resolved extrinsics:")
-    print(
-        "  IMU to Base:", transform_to_quat_xyzw_xyz(pipeline_config.extrinsic_imu2base)
-    )
-    print(
-        "  Lidar to Base:",
-        transform_to_quat_xyzw_xyz(pipeline_config.extrinsic_lidar2base),
-    )
-
     from .lio_pipeline import LIOPipeline
 
     pipeline = LIOPipeline(pipeline_config)
 
     from tqdm import tqdm
 
-    for kind, data_tuple in tqdm(dataloader, total=len(dataloader), desc="Data"):
+    for kind, data_dict in tqdm(dataloader, total=len(dataloader), desc="data"):
         if kind == "imu":
-            pipeline.add_imu(*data_tuple)
+            pipeline.add_imu(**data_dict)
         elif kind == "lidar":
-            pipeline.add_lidar(*data_tuple)
+            pipeline.register_scan(**data_dict)
 
     if log_results:
         pipeline.dump_results_to_disk()
