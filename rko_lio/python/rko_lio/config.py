@@ -53,7 +53,7 @@ Description of parameters
 - ``multiplier_to_seconds``:
 
     Factor applied to raw timestamp values to convert them to seconds.
-    Secondsd and nanoseconds are detected automatically when this is 0.0 (default).
+    Seconds and nanoseconds are detected automatically when this is 0.0 (default).
     Specify this for any other case.
     For example, if timestamps are in microseconds, use ``1e-6``.
 
@@ -70,43 +70,34 @@ Description of parameters
     First, absolute timestamps are checked for. Then, relative. If the heuristics are still not satisfied, then the above described error is thrown.
 """
 
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from .rko_lio_pybind import (
     _LIOConfig,
     _TimestampProcessingConfig,
 )
-from .util import quat_xyzw_xyz_to_transform, transform_to_quat_xyzw_xyz
+from .util import error_and_exit
 
 
-class TimestampProcessingConfig(_TimestampProcessingConfig):
+@dataclass
+class TimestampConfig:
+    multiplier_to_seconds: float = 0.0
+    force_absolute: bool = False
+    force_relative: bool = False
 
-    default_config = {
-        "multiplier_to_seconds": 0.0,
-        "force_absolute": False,
-        "force_relative": False,
-    }
-
-    def __init__(self, **kwargs):
-        """kwargs should match the keys expected in default_config"""
-        super().__init__()
-        cfg = dict(self.default_config)
-        cfg.update(kwargs)
-        for k, v in cfg.items():
-            setattr(self, k, v)
+    def to_pybind(self) -> _TimestampProcessingConfig:
+        cfg = _TimestampProcessingConfig()
+        for field in fields(self):
+            setattr(cfg, field.name, getattr(self, field.name))
+        return cfg
 
     def to_dict(self):
-        """Return a dict version"""
-        return {k: getattr(self, k) for k in self.default_config.keys()}
-
-    def __repr__(self):
-        attrs = ", ".join(
-            f"{k}={getattr(self, k)!r}" for k in self.default_config.keys()
-        )
-        return f"TimestampProcessingConfig({attrs})"
+        return asdict(self)
 
 
-class LIOConfig(_LIOConfig):
+@dataclass
+class LIOConfig:
     """
     LIO configuration options.
 
@@ -126,7 +117,7 @@ class LIOConfig(_LIOConfig):
         Minimum usable range of lidar (meters).
     convergence_criterion : float, default 1e-5
         Convergence threshold for optimization.
-    max_correspondance_distance : float, default 0.5
+    max_correspondence_distance : float, default 0.5
         Max distance for associating points (meters).
     max_num_threads : int, default 0
         Max thread count (0 = autodetect).
@@ -140,41 +131,31 @@ class LIOConfig(_LIOConfig):
         Minimum scaling on the orientation regularisation weight. Set to -1 to disable the cost.
     """
 
-    default_config = {
-        "deskew": True,
-        "max_iterations": 100,
-        "voxel_size": 1.0,
-        "max_points_per_voxel": 20,
-        "max_range": 100.0,
-        "min_range": 1.0,
-        "convergence_criterion": 1e-5,
-        "max_correspondance_distance": 0.5,
-        "max_num_threads": 0,
-        "initialization_phase": False,
-        "max_expected_jerk": 3.0,
-        "double_downsample": True,
-        "min_beta": 200.0,
-    }
+    deskew: bool = True
+    max_iterations: int = 100
+    voxel_size: float = 1.0
+    max_points_per_voxel: int = 20
+    max_range: float = 100.0
+    min_range: float = 1.0
+    convergence_criterion: float = 1e-5
+    max_correspondence_distance: float = 0.5
+    max_num_threads: int = 0
+    initialization_phase: bool = False
+    max_expected_jerk: float = 3.0
+    double_downsample: bool = True
+    min_beta: float = 200.0
 
-    def __init__(self, **kwargs):
-        """kwargs should match the keys expected in default_config"""
-        super().__init__()
-        cfg = dict(self.default_config)
-        cfg.update(kwargs)
-        for k, v in cfg.items():
-            setattr(self, k, v)
+    def to_pybind(self) -> _LIOConfig:
+        cfg = _LIOConfig()
+        for field in fields(self):
+            setattr(cfg, field.name, getattr(self, field.name))
+        return cfg
 
     def to_dict(self):
-        """Return a dict version"""
-        return {k: getattr(self, k) for k in self.default_config.keys()}
-
-    def __repr__(self):
-        attrs = ", ".join(
-            f"{k}={getattr(self, k)!r}" for k in self.default_config.keys()
-        )
-        return f"LIOConfig({attrs})"
+        return asdict(self)
 
 
+@dataclass
 class PipelineConfig:
     """
     Configuration for the LIOPipeline, wrapping both LIO- and timestamp-related configs.
@@ -190,7 +171,6 @@ class PipelineConfig:
         Extrinsic transform from lidar frame to base frame.
     viz : bool, default False
         Enable visualization using rerun.
-    viz_every_n_frames : int, default 20
     dump_deskewed_scans : bool, default False
         Save deskewed scans to disk.
     log_dir : Path, default "results"
@@ -199,100 +179,50 @@ class PipelineConfig:
         Name of the current run.
     """
 
-    default_config = {
-        "extrinsic_imu2base_quat_xyzw_xyz": None,
-        "extrinsic_lidar2base_quat_xyzw_xyz": None,
-        "viz": False,
-        "viz_every_n_frames": 20,
-        "dump_deskewed_scans": False,
-        "log_dir": Path("results").resolve().as_posix(),
-        "run_name": None,
-    }
+    lio: LIOConfig | None = None
+    timestamps: TimestampConfig | None = None
+    extrinsic_imu2base_quat_xyzw_xyz: list | None = None
+    extrinsic_lidar2base_quat_xyzw_xyz: list | None = None
+    viz: bool = False
+    dump_deskewed_scans: bool = False
+    log_dir: Path = Path("results")
+    run_name: str | None = None
 
-    def __init__(self, lio=None, timestamps=None, **kwargs):
-        """kwargs should match the keys expected in default_config"""
-        # ---- build LIO subconfig ----
-        if isinstance(lio, dict):
-            self.lio = LIOConfig(**lio)
-        elif isinstance(lio, LIOConfig):
-            self.lio = lio
-        else:
-            # collect any keys from kwargs intended for LIOConfig
-            lio_args = {
-                k: v for k, v in kwargs.items() if k in LIOConfig.default_config
-            }
-            self.lio = LIOConfig(**lio_args)
-
-        # ---- build TimestampProcessing subconfig ----
-        if isinstance(timestamps, dict):
-            self.timestamps = TimestampProcessingConfig(**timestamps)
-        elif isinstance(timestamps, TimestampProcessingConfig):
-            self.timestamps = timestamps
-        else:
-            ts_args = {
-                k: v
-                for k, v in kwargs.items()
-                if k in TimestampProcessingConfig.default_config
-            }
-            self.timestamps = TimestampProcessingConfig(**ts_args)
-
-        # --- Pipeline parameters ---
-        cfg = dict(self.default_config)
-        cfg.update(kwargs)
-        self.extrinsic_imu2base = None
-        self.extrinsic_lidar2base = None
-        if cfg.get("extrinsic_imu2base_quat_xyzw_xyz") is not None:
-            self.extrinsic_imu2base = quat_xyzw_xyz_to_transform(
-                cfg["extrinsic_imu2base_quat_xyzw_xyz"]
-            )
-        if cfg.get("extrinsic_lidar2base_quat_xyzw_xyz") is not None:
-            self.extrinsic_lidar2base = quat_xyzw_xyz_to_transform(
-                cfg["extrinsic_lidar2base_quat_xyzw_xyz"]
-            )
-        self.viz = cfg["viz"]
-        self.viz_every_n_frames = cfg["viz_every_n_frames"]
-        self.dump_deskewed_scans = cfg["dump_deskewed_scans"]
-        self.log_dir = Path(cfg["log_dir"])
-        self.run_name = cfg["run_name"]
-
-    def to_dict(self):
-        """Return full configuration as serializable dict."""
-        d = dict(self.default_config)
-        extrinsic_key_map = {
-            "extrinsic_imu2base_quat_xyzw_xyz": "extrinsic_imu2base",
-            "extrinsic_lidar2base_quat_xyzw_xyz": "extrinsic_lidar2base",
-        }
-        for key in self.default_config:
-            if key in extrinsic_key_map:
-                val = getattr(self, extrinsic_key_map[key])
-                d[key] = transform_to_quat_xyzw_xyz(val) if val is not None else None
-            else:
-                if hasattr(self, key):
-                    value = getattr(self, key)
-                    if isinstance(value, Path):
-                        value = value.resolve().as_posix()
-                    d[key] = value
-        d["lio"] = self.lio.to_dict()
-        d["timestamps"] = self.timestamps.to_dict()
-        return d
+    def __post_init__(self):
+        if self.lio is None:
+            self.lio = LIOConfig()
+        if self.timestamps is None:
+            self.timestamps = TimestampConfig()
+        self.log_dir = Path(self.log_dir)
 
     @classmethod
-    def default_dict(cls, include_timestamps: bool = False):
-        """
-        Parameters
-        ----------
-        include_timestamps : bool, default False
-            If True, include the timestamp subconfig.
-        """
-        d = dict(cls.default_config)
-        # remove the keys who's override behaviour will not be intuitive
-        # or should not be specified in a user config
-        d.pop("viz")
-        d.pop("viz_every_n_frames")
-        d["lio"] = dict(LIOConfig.default_config)
-        if include_timestamps:
-            d["timestamps"] = dict(TimestampProcessingConfig.default_config)
-        return d
+    def from_dict(cls, args: dict):
+        lio_args = args.pop("lio", {})
+        ts_args = args.pop("timestamps", {})
 
-    def __repr__(self):
-        return f"PipelineConfig({self.to_dict()!r})"
+        pipeline_args = {}
+        for field in fields(cls):
+            fname = field.name
+            if fname in ("lio", "timestamps"):
+                continue
+            if fname in args:
+                pipeline_args[fname] = args.pop(fname)
+
+        lio_valid_names = [f.name for f in fields(LIOConfig)]
+        for arg in args:
+            if arg not in lio_valid_names:
+                error_and_exit(
+                    "Config argument", arg, "is not a valid key. Please remove."
+                )
+        lio_args.update(args)
+
+        return cls(
+            lio=LIOConfig(**lio_args),
+            timestamps=TimestampConfig(**ts_args),
+            **pipeline_args,
+        )
+
+    def to_dict(self):
+        res = asdict(self)
+        res["log_dir"] = res["log_dir"].as_posix()
+        return res
