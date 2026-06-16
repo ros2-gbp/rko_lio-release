@@ -31,23 +31,24 @@ namespace Eigen {
 using Matrix3_6d = Matrix<double, 3, 6>;
 using Vector6d = Matrix<double, 6, 1>;
 using Matrix6d = Matrix<double, 6, 6>;
-using Matrix12d = Matrix<double, 12, 12>;
 } // namespace Eigen
 
 namespace rko_lio::core {
 // aliases
 using Vector3dVector = std::vector<Eigen::Vector3d>;
-using Secondsd = std::chrono::duration<double>;
-using TimestampVector = std::vector<Secondsd>;
+using Nsec = std::chrono::nanoseconds;
+using TimestampVector = std::vector<Nsec>;
 
 // constants and util funcs
 constexpr double square(double x) { return x * x; }
 constexpr double GRAVITY_MAG = 9.8107;
 inline Eigen::Vector3d gravity() { return {0, 0, -GRAVITY_MAG}; }
 
+inline double to_seconds(const Nsec d) { return std::chrono::duration<double>(d).count(); }
+
 // data structs
 struct State {
-  Secondsd time{0};
+  Nsec time{0};
   Sophus::SE3d pose;
   Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
   Eigen::Vector3d angular_velocity = Eigen::Vector3d::Zero();
@@ -60,20 +61,62 @@ struct ImuBias {
 };
 
 struct ImuControl {
-  Secondsd time{0};
+  Nsec time{0};
   Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
   Eigen::Vector3d angular_velocity = Eigen::Vector3d::Zero();
 };
 
-struct Timestamps {
-  Secondsd min;
-  Secondsd max;
-  TimestampVector times;
-};
+/** Accumulated IMU statistics over the interval between consecutive LiDAR scans. */
+struct IntervalStats {
+  /** Number of IMU samples accumulated during this interval. */
+  int imu_count = 0;
 
-struct LidarFrame {
-  Timestamps timestamps;
-  Vector3dVector points;
+  /** Sum of unbiased angular velocity samples. */
+  Eigen::Vector3d angular_velocity_sum = Eigen::Vector3d::Zero();
+
+  /** Sum of gravity-compensated body-frame accelerations. */
+  Eigen::Vector3d body_acceleration_sum = Eigen::Vector3d::Zero();
+
+  /** Sum of unbiased raw IMU accelerations. */
+  Eigen::Vector3d imu_acceleration_sum = Eigen::Vector3d::Zero();
+
+  /** Mean magnitude of raw IMU acceleration over the interval. */
+  double imu_accel_mag_mean = 0;
+
+  /** Variance accumulator for acceleration magnitude using Welford’s method. */
+  double welford_sum_of_squares = 0;
+
+  /**
+   * Update accumulated statistics with a new IMU measurement.
+   * @param unbiased_ang_vel Unbiased angular velocity.
+   * @param uncompensated_unbiased_accel Uncompensated, unbiased acceleration.
+   * @param compensated_accel Gravity-compensated acceleration.
+   */
+  void update(const Eigen::Vector3d& unbiased_ang_vel,
+              const Eigen::Vector3d& uncompensated_unbiased_accel,
+              const Eigen::Vector3d& compensated_accel) {
+    ++imu_count;
+    angular_velocity_sum += unbiased_ang_vel;
+    imu_acceleration_sum += uncompensated_unbiased_accel;
+
+    const double previous_mean = imu_accel_mag_mean;
+    const double accel_norm = uncompensated_unbiased_accel.norm();
+
+    imu_accel_mag_mean += (accel_norm - previous_mean) / imu_count;
+    welford_sum_of_squares += (accel_norm - previous_mean) * (accel_norm - imu_accel_mag_mean);
+
+    body_acceleration_sum += compensated_accel;
+  }
+
+  /** Reset all accumulated statistics to zero. */
+  void reset() {
+    imu_count = 0;
+    angular_velocity_sum.setZero();
+    body_acceleration_sum.setZero();
+    imu_acceleration_sum.setZero();
+    imu_accel_mag_mean = 0;
+    welford_sum_of_squares = 0;
+  }
 };
 
 }; // namespace rko_lio::core
