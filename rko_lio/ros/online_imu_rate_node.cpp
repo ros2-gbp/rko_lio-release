@@ -23,17 +23,12 @@
  */
 
 #include "base_node.hpp"
-#include "rko_lio/core/process_timestamps.hpp"
+#include "rko_lio/core/error.hpp"
 #include "rko_lio/core/profiler.hpp"
 #include "rko_lio/ros/utils/utils.hpp"
-// ros
-#include <nav_msgs/msg/odometry.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-// other
-#include <stdexcept>
 
 namespace rko_lio::ros {
+namespace {
 
 // Sequential variant of the LIO node: IMU and LiDAR are processed inline on
 // the rclcpp executor thread. The IMU callback feeds add_imu_measurement and
@@ -53,19 +48,19 @@ public:
   OnlineImuRateNode(OnlineImuRateNode&&) = delete;
   OnlineImuRateNode& operator=(const OnlineImuRateNode&) = delete;
   OnlineImuRateNode& operator=(OnlineImuRateNode&&) = delete;
+  ~OnlineImuRateNode() = default;
 
   explicit OnlineImuRateNode(const rclcpp::NodeOptions& options)
       : BaseNode("rko_lio_online_imu_rate_node", options), timer("RKO LIO Online IMU-rate Node") {
     odom_at_imu_rate_topic = node->declare_parameter<std::string>("seq.odom_at_imu_rate_topic", odom_at_imu_rate_topic);
     tf_at_imu_rate = node->declare_parameter<bool>("seq.tf_at_imu_rate", tf_at_imu_rate);
 
-    const rclcpp::QoS publisher_qos((rclcpp::SystemDefaultsQoS().keep_last(1).durability_volatile()));
-    odom_at_imu_rate_publisher =
-        node->create_publisher<nav_msgs::msg::Odometry>(odom_at_imu_rate_topic, publisher_qos);
+    const rclcpp::QoS publisher_qos(rclcpp::SystemDefaultsQoS().keep_last(1).durability_volatile());
+    odom_at_imu_rate_publisher = node->create_publisher<nav_msgs::msg::Odometry>(odom_at_imu_rate_topic, publisher_qos);
 
-    RCLCPP_INFO_STREAM(node->get_logger(),
-                       "OnlineImuRateNode publishing IMU-rate odometry to "
-                           << odom_at_imu_rate_topic << ", TF rate: " << (tf_at_imu_rate ? "imu" : "lidar"));
+    RCLCPP_INFO_STREAM(node->get_logger(), "OnlineImuRateNode publishing IMU-rate odometry to "
+                                               << odom_at_imu_rate_topic
+                                               << ", TF rate: " << (tf_at_imu_rate ? "imu" : "lidar"));
 
     const auto qos_imu = rclcpp::SensorDataQoS().keep_last(100);
     const auto qos_lidar = rclcpp::SensorDataQoS().keep_last(10);
@@ -108,21 +103,29 @@ public:
     }
 
     try {
-      const auto [timestamps, scan] = process_lidar_msg(lidar_msg);
-      const core::Vector3dVector deskewed_frame = register_scan_locked(scan, timestamps.times);
-      if (deskewed_frame.empty()) {
-        // first frame is skipped and an empty frame is returned. nothing to publish.
+      LidarScan scan = process_lidar_msg(lidar_msg);
+      const core::Vector3sVector deskewed_scan = register_scan_locked(std::move(scan.points), scan.timestamps);
+      if (deskewed_scan.empty()) {
+        // first scan is skipped and an empty scan is returned. nothing to publish.
         return;
       }
-      publish_lidar_outputs(deskewed_frame);
+      publish_lidar_outputs(deskewed_scan);
       publish_tf(lio->lidar_state);
-    } catch (const std::invalid_argument& ex) {
-      RCLCPP_ERROR_STREAM(node->get_logger(), "Encountered error, dropping frame. Error: " << ex.what());
+    } catch (const core::InputError& ex) {
+      RCLCPP_ERROR_STREAM(node->get_logger(), "Dropping scan: " << ex.what());
+    } catch (const core::RegistrationError& ex) {
+      RCLCPP_ERROR_STREAM(node->get_logger(), "Registration failed (" << ex.what() << ").");
+      if (reset_on_registration_error) {
+        reset_odometry();
+      } else {
+        RCLCPP_WARN(node->get_logger(), "Set reset_on_registration_error:=true to reset odometry and continue.");
+        throw;
+      }
     }
   }
-
 };
 
+} // namespace
 } // namespace rko_lio::ros
 
 #include <rclcpp_components/register_node_macro.hpp>
