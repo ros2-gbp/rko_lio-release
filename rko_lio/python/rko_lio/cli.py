@@ -53,7 +53,7 @@ def dump_config_callback(value: bool):
         with open("config.yaml", "w") as f:
             yaml.dump(PipelineConfig().to_dict(), f, default_flow_style=False)
         info(
-            "Default config dumped to config.yaml. Note that the extrinsics are left as an empty list. If you need them, you need to specify them as \[qx, qy, qz, qw, x, y, z]. Delete all the keys you don't need."
+            r"Default config dumped to config.yaml. Note that the extrinsics are left as an empty list. If you need them, you need to specify them as \[qx, qy, qz, qw, x, y, z]. Delete all the keys you don't need."
         )
         raise typer.Exit(0)
 
@@ -101,7 +101,7 @@ def cli(
         None,
         "--dataloader",
         "-d",
-        help="Specify a dataloader: [rosbag, raw, helipr]. Leave empty to guess one",
+        help=r"Specify a dataloader: \[rosbag, raw]. Leave empty to guess one",
         show_choices=True,
         callback=dataloader_name_callback,
         case_sensitive=False,
@@ -160,12 +160,6 @@ def cli(
         help="Dump each deskewed/motion-undistorted scan as a .ply file under log_dir/run_name, only if logging with --log",
         rich_help_panel="Disk logging options",
     ),
-    sequence: str | None = typer.Option(
-        None,
-        "--sequence",
-        help="Extra dataloader argument: sensor sequence",
-        rich_help_panel="HeLiPR dataloader options",
-    ),
     imu_topic: str | None = typer.Option(
         None,
         "--imu",
@@ -202,7 +196,7 @@ def cli(
         help="Print the current version of RKO_LIO and exit",
         callback=version_callback,
         is_eager=True,
-        rich_help_panel="Auxilary commands",
+        rich_help_panel="Auxiliary commands",
     ),
     dump_config: bool | None = typer.Option(
         None,
@@ -210,7 +204,7 @@ def cli(
         help="Dump the default config to config.yaml and exit",
         callback=dump_config_callback,
         is_eager=True,
-        rich_help_panel="Auxilary commands",
+        rich_help_panel="Auxiliary commands",
     ),
 ):
     """
@@ -219,7 +213,7 @@ def cli(
 
     user_config = {}
     if config_fp:
-        with open(config_fp, "r") as f:
+        with open(config_fp) as f:
             import yaml
 
             user_config.update(yaml.safe_load(f))
@@ -244,13 +238,12 @@ def cli(
         dataloader_factory(
             name=dataloader_name,
             data_path=data_path,
-            sequence=sequence,
             imu_topic=imu_topic,
             lidar_topic=lidar_topic,
             imu_frame_id=imu_frame,
             lidar_frame_id=lidar_frame,
             base_frame_id=base_frame,
-            timestamp_config=pipeline_config.timestamps,
+            timestamp_config=pipeline_config.lidar_timestamps,
         )
     )
     print("Loaded dataloader:", dataloader)
@@ -264,13 +257,9 @@ def cli(
         info("Extrinsics missing or not fully specified in config.")
         dl_ext_imu2base, dl_ext_lidar2base = dataloader.extrinsics
         if pipeline_config.extrinsic_imu2base_quat_xyzw_xyz is None:
-            pipeline_config.extrinsic_imu2base_quat_xyzw_xyz = (
-                transform_to_quat_xyzw_xyz(dl_ext_imu2base)
-            )
+            pipeline_config.extrinsic_imu2base_quat_xyzw_xyz = transform_to_quat_xyzw_xyz(dl_ext_imu2base)
         if pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz is None:
-            pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz = (
-                transform_to_quat_xyzw_xyz(dl_ext_lidar2base)
-            )
+            pipeline_config.extrinsic_lidar2base_quat_xyzw_xyz = transform_to_quat_xyzw_xyz(dl_ext_lidar2base)
 
     if (
         pipeline_config.extrinsic_imu2base_quat_xyzw_xyz is None

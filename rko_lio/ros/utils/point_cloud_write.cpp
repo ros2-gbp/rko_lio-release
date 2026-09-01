@@ -28,9 +28,9 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 namespace {
-using PointCloud2 = sensor_msgs::msg::PointCloud2;
-using PointField = sensor_msgs::msg::PointField;
-using Header = std_msgs::msg::Header;
+using sensor_msgs::msg::PointCloud2;
+using sensor_msgs::msg::PointField;
+using std_msgs::msg::Header;
 using StampType = builtin_interfaces::msg::Time;
 
 std::string FixFrameId(const std::string& frame_id) { return std::regex_replace(frame_id, std::regex("^/"), ""); }
@@ -60,12 +60,12 @@ PointCloud2::UniquePtr create_point_cloud2_msg(const size_t n_points, const Head
   return cloud_msg;
 }
 
-void fill_point_cloud2_xyz(const std::vector<Eigen::Vector3d>& points, PointCloud2& msg) {
+void fill_point_cloud2_xyz(const rko_lio::core::Vector3sVector& points, PointCloud2& msg) {
   sensor_msgs::PointCloud2Iterator<float> msg_x(msg, "x");
   sensor_msgs::PointCloud2Iterator<float> msg_y(msg, "y");
   sensor_msgs::PointCloud2Iterator<float> msg_z(msg, "z");
   for (size_t i = 0; i < points.size(); i++, ++msg_x, ++msg_y, ++msg_z) {
-    const Eigen::Vector3d& point = points[i];
+    const Eigen::Vector3s& point = points[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     *msg_x = static_cast<float>(point.x());
     *msg_y = static_cast<float>(point.y());
     *msg_z = static_cast<float>(point.z());
@@ -74,7 +74,7 @@ void fill_point_cloud2_xyz(const std::vector<Eigen::Vector3d>& points, PointClou
 } // namespace
 namespace rko_lio::ros::utils {
 
-PointCloud2::UniquePtr eigen_to_point_cloud2(const std::vector<Eigen::Vector3d>& points, const Header& header) {
+PointCloud2::UniquePtr eigen_to_point_cloud2(const rko_lio::core::Vector3sVector& points, const Header& header) {
   PointCloud2::UniquePtr msg = create_point_cloud2_msg(points.size(), header);
   fill_point_cloud2_xyz(points, *msg);
   return msg;
