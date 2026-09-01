@@ -24,16 +24,14 @@
 The C++ backend (`rko_lio::core::process_timestamps`) tries to automatically
 decide whether a LiDAR timestamp sequence is **absolute** (already aligned to
 wall-clock time) or **relative** (offsets that must be shifted by the message
-header time). If the data cannot be confidently classified as either, a
-`std::runtime_error` is thrown:
+header time). If the data cannot be confidently classified as either, this error is thrown:
 
 .. code-block::
 
-    Runtime Error: TimestampProcessingConfig does not cover this particular
-    case of data. Please investigate, modify the config, or open an issue.
+    Cannot classify LiDAR timestamps as absolute or relative.
 
 
-When this error occurs, you can potentially adjust the `timestamps` section of your
+When this error occurs, you can potentially adjust the `lidar_timestamps` section of your
 configuration file to fix the issue. Specifying one of `force_absolute` or `force_relative` should do the trick.
 
 Example (default configuration)
@@ -42,7 +40,7 @@ Example (default configuration)
 .. code-block:: yaml
 
     your other configuration keys here
-    timestamps:
+    lidar_timestamps:
       multiplier_to_seconds: 0.0
       force_absolute: false
       force_relative: false
@@ -109,14 +107,12 @@ class LIOConfig:
         Maximum optimization iterations for scan matching.
     voxel_size : float, default 1.0
         Size of map voxels (meters).
-    max_points_per_voxel : int, default 20
-        Maximum points stored per voxel.
     max_range : float, default 100.0
         Max usable range of lidar (meters).
     min_range : float, default 1.0
         Minimum usable range of lidar (meters).
     convergence_criterion : float, default 1e-5
-        Convergence threshold for optimization.
+        Convergence threshold for optimization, on the relative change in cost per iteration.
     max_correspondence_distance : float, default 0.5
         Max distance for associating points (meters).
     max_num_threads : int, default 0
@@ -134,7 +130,6 @@ class LIOConfig:
     deskew: bool = True
     max_iterations: int = 100
     voxel_size: float = 1.0
-    max_points_per_voxel: int = 20
     max_range: float = 100.0
     min_range: float = 1.0
     convergence_criterion: float = 1e-5
@@ -163,12 +158,12 @@ class PipelineConfig:
     Parameters
     ----------
     lio : dict or LIOConfig
-    timestamps : dict or TimestampProcessingConfig
+    lidar_timestamps : dict or TimestampConfig
         Configuration for timestamp preprocessing.
-    extrinsic_imu2base : np.ndarray[4,4] or None, optional
-        Extrinsic transform from IMU frame to base frame.
-    extrinsic_lidar2base : np.ndarray[4,4] or None, optional
-        Extrinsic transform from lidar frame to base frame.
+    extrinsic_imu2base_quat_xyzw_xyz : list or None, optional
+        Extrinsic from IMU to base as ``[qx, qy, qz, qw, x, y, z]``.
+    extrinsic_lidar2base_quat_xyzw_xyz : list or None, optional
+        Extrinsic from lidar to base as ``[qx, qy, qz, qw, x, y, z]``.
     viz : bool, default False
         Enable visualization using rerun.
     dump_deskewed_scans : bool, default False
@@ -180,7 +175,7 @@ class PipelineConfig:
     """
 
     lio: LIOConfig | None = None
-    timestamps: TimestampConfig | None = None
+    lidar_timestamps: TimestampConfig | None = None
     extrinsic_imu2base_quat_xyzw_xyz: list | None = None
     extrinsic_lidar2base_quat_xyzw_xyz: list | None = None
     viz: bool = False
@@ -191,34 +186,39 @@ class PipelineConfig:
     def __post_init__(self):
         if self.lio is None:
             self.lio = LIOConfig()
-        if self.timestamps is None:
-            self.timestamps = TimestampConfig()
+        if self.lidar_timestamps is None:
+            self.lidar_timestamps = TimestampConfig()
         self.log_dir = Path(self.log_dir)
 
     @classmethod
     def from_dict(cls, args: dict):
         lio_args = args.pop("lio", {})
-        ts_args = args.pop("timestamps", {})
+        ts_args = args.pop("lidar_timestamps", {})
 
         pipeline_args = {}
         for field in fields(cls):
             fname = field.name
-            if fname in ("lio", "timestamps"):
+            if fname in ("lio", "lidar_timestamps"):
                 continue
             if fname in args:
                 pipeline_args[fname] = args.pop(fname)
 
+        if "max_points_per_voxel" in args or "max_points_per_voxel" in lio_args:
+            error_and_exit(
+                "Config argument",
+                "max_points_per_voxel",
+                "was removed, it is now fixed at compile time so the map can store points inline. Use voxel_size to control map density instead: smaller keeps more points overall, larger keeps fewer.",
+            )
+
         lio_valid_names = [f.name for f in fields(LIOConfig)]
         for arg in args:
             if arg not in lio_valid_names:
-                error_and_exit(
-                    "Config argument", arg, "is not a valid key. Please remove."
-                )
+                error_and_exit("Config argument", arg, "is not a valid key. Please remove.")
         lio_args.update(args)
 
         return cls(
             lio=LIOConfig(**lio_args),
-            timestamps=TimestampConfig(**ts_args),
+            lidar_timestamps=TimestampConfig(**ts_args),
             **pipeline_args,
         )
 
