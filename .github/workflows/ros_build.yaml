@@ -1,30 +1,17 @@
 name: ROS Build
 on:
-  push:
-    branches: [master]
   pull_request:
     branches: [master]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check_relevant_changes:
-    runs-on: ubuntu-latest
-    outputs:
-      continue_run: ${{ steps.check.outputs.continue_run }}
-    env:
-      IGNORED_FOLDERS: "rko_lio/python|docs|tests/python|tests/core|cmake/dependencies/catch2"
-      IGNORED_FILES: "pyproject.toml|CHANGELOG.rst|LICENSE|README.md"
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - id: check
-        run: |
-          changed_files=$(git diff --name-only origin/master)
-          echo "Changed files: $changed_files"
-          if echo "$changed_files" | grep -vE "^($IGNORED_FOLDERS)/|^($IGNORED_FILES)$" > /dev/null; then
-            echo "continue_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "continue_run=false" >> $GITHUB_OUTPUT
-          fi
+    uses: ./.github/workflows/check_relevant_changes.yaml
+    with:
+      ignored_folders: "rko_lio/python|docs|tests/python|launch|config"
+      ignored_files: "pyproject.toml"
+      self: ".github/workflows/ros_build.yaml|.github/workflows/check_relevant_changes.yaml"
   ros_build_with_rosdep:
     needs: check_relevant_changes
     if: needs.check_relevant_changes.outputs.continue_run == 'true'

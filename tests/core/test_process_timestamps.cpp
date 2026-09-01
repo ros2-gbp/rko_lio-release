@@ -1,38 +1,17 @@
-// MIT License
-//
-// Copyright (c) 2025 Meher V.R. Malladi.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
+#include "rko_lio/core/error.hpp"
 #include "rko_lio/core/process_timestamps.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <stdexcept>
 
+using Catch::Matchers::WithinAbs;
+using rko_lio::core::InputError;
 using rko_lio::core::Nsec;
 using rko_lio::core::process_timestamps;
-using rko_lio::core::to_seconds;
 using rko_lio::core::TimestampProcessingConfig;
-using Catch::Matchers::WithinAbs;
+using rko_lio::core::to_seconds;
 
 namespace {
 std::vector<double> linspace(double start, double end, size_t n) {
@@ -58,9 +37,9 @@ TEST_CASE("process_timestamps: absolute seconds, header ~= min -> unchanged", "[
 
   REQUIRE_THAT(to_seconds(result.min), WithinAbs(1234.0, 1e-9));
   REQUIRE_THAT(to_seconds(result.max), WithinAbs(1234.1, 1e-9));
-  REQUIRE(result.times.size() == raw.size());
-  REQUIRE_THAT(to_seconds(result.times.front()), WithinAbs(1234.0, 1e-9));
-  REQUIRE_THAT(to_seconds(result.times.back()), WithinAbs(1234.1, 1e-9));
+  REQUIRE(result.per_point.size() == raw.size());
+  REQUIRE_THAT(to_seconds(result.per_point.front()), WithinAbs(1234.0, 1e-9));
+  REQUIRE_THAT(to_seconds(result.per_point.back()), WithinAbs(1234.1, 1e-9));
 }
 
 TEST_CASE("process_timestamps: relative seconds, min ~= 0 -> header offset added", "[process_timestamps]") {
@@ -70,8 +49,8 @@ TEST_CASE("process_timestamps: relative seconds, min ~= 0 -> header offset added
 
   REQUIRE_THAT(to_seconds(result.min), WithinAbs(1234.5, 1e-9));
   REQUIRE_THAT(to_seconds(result.max), WithinAbs(1234.6, 1e-9));
-  REQUIRE_THAT(to_seconds(result.times.front()), WithinAbs(1234.5, 1e-9));
-  REQUIRE_THAT(to_seconds(result.times.back()), WithinAbs(1234.6, 1e-9));
+  REQUIRE_THAT(to_seconds(result.per_point.front()), WithinAbs(1234.5, 1e-9));
+  REQUIRE_THAT(to_seconds(result.per_point.back()), WithinAbs(1234.6, 1e-9));
 }
 
 TEST_CASE("process_timestamps: absolute nanoseconds -> heuristic infers ns source", "[process_timestamps]") {
@@ -131,11 +110,11 @@ TEST_CASE("process_timestamps: custom multiplier_to_seconds is honored", "[proce
 TEST_CASE("process_timestamps: ambiguous case throws", "[process_timestamps]") {
   const auto raw = linspace(50.0, 50.1, 100);
   const Nsec header = ns_from_seconds(1000.0);
-  REQUIRE_THROWS_AS(process_timestamps(raw, header, {}), std::runtime_error);
+  REQUIRE_THROWS_AS(process_timestamps(raw, header, {}), InputError);
 }
 
 TEST_CASE("process_timestamps: empty raw_timestamps throws instead of UB", "[process_timestamps]") {
   const std::vector<double> empty;
   const Nsec header = ns_from_seconds(1234.0);
-  REQUIRE_THROWS_AS(process_timestamps(empty, header, {}), std::invalid_argument);
+  REQUIRE_THROWS_AS(process_timestamps(empty, header, {}), InputError);
 }
