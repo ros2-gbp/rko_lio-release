@@ -1,30 +1,17 @@
 name: Core C++ Tests
 on:
-  push:
-    branches: [master]
   pull_request:
     branches: [master]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check_relevant_changes:
-    runs-on: ubuntu-latest
-    outputs:
-      continue_run: ${{ steps.check.outputs.continue_run }}
-    env:
-      IGNORED_FOLDERS: "rko_lio/ros|rko_lio/python|tests/python|docs|launch|config"
-      IGNORED_FILES: "colcon.pkg|package.xml|rosdoc2.yaml|CHANGELOG.rst|LICENSE|README.md|pyproject.toml"
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - id: check
-        run: |
-          changed_files=$(git diff --name-only origin/master)
-          echo "Changed files: $changed_files"
-          if echo "$changed_files" | grep -vE "^($IGNORED_FOLDERS)/|^($IGNORED_FILES)$" > /dev/null; then
-            echo "continue_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "continue_run=false" >> $GITHUB_OUTPUT
-          fi
+    uses: ./.github/workflows/check_relevant_changes.yaml
+    with:
+      ignored_folders: "rko_lio/ros|rko_lio/python|tests/python|docs|launch|config"
+      ignored_files: "colcon.pkg|package.xml|pyproject.toml"
+      self: ".github/workflows/core_tests.yaml|.github/workflows/check_relevant_changes.yaml"
   core_tests:
     needs: check_relevant_changes
     if: needs.check_relevant_changes.outputs.continue_run == 'true'
@@ -32,13 +19,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-22.04
-          - ubuntu-22.04-arm
-          - ubuntu-24.04
-          - ubuntu-24.04-arm
-          - macos-14
-          - macos-15
+        include:
+          - {os: ubuntu-22.04, scalar: float}
+          - {os: ubuntu-22.04-arm, scalar: double}
+          - {os: ubuntu-24.04, scalar: double}
+          - {os: ubuntu-24.04-arm, scalar: float}
+          - {os: macos-14, scalar: float}
+          - {os: macos-15, scalar: double}
     env:
       GIT_LFS_SKIP_SMUDGE: 1
     steps:
@@ -52,7 +39,8 @@ jobs:
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DRKO_LIO_FETCH_CONTENT_DEPS=ON \
             -DRKO_LIO_BUILD_ROS=OFF \
-            -DRKO_LIO_BUILD_TESTS=ON
+            -DRKO_LIO_BUILD_TESTS=ON \
+            -DRKO_LIO_SCALAR=${{ matrix.scalar }}
       - name: Build
         shell: bash
         run: cmake --build build/core
