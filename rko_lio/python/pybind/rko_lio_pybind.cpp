@@ -22,6 +22,7 @@
  * SOFTWARE.
  */
 
+#include "rko_lio/core/error.hpp"
 #include "rko_lio/core/lio.hpp"
 #include "rko_lio/core/process_timestamps.hpp"
 #include "stl_vector_eigen.hpp"
@@ -37,13 +38,16 @@ namespace py = pybind11;
 using namespace pybind11::literals;
 using namespace rko_lio::core;
 
-PYBIND11_MAKE_OPAQUE(std::vector<Eigen::Vector3d>);
+PYBIND11_MAKE_OPAQUE(std::vector<Eigen::Vector3s>);
 PYBIND11_MAKE_OPAQUE(std::vector<double>);
 PYBIND11_MAKE_OPAQUE(std::vector<int64_t>);
 
 PYBIND11_MODULE(rko_lio_pybind, m) {
-  auto vector3dvector = pybind_eigen_vector_of_vector<Eigen::Vector3d>(
-      m, "_Vector3dVector", "std::vector<Eigen::Vector3d>", py::py_array_to_vectors_double<Eigen::Vector3d>);
+  py::register_exception<InputError>(m, "InputError");
+  py::register_exception<RegistrationError>(m, "RegistrationError");
+
+  const auto vector3svector = pybind_eigen_vector_of_vector<Eigen::Vector3s>(
+      m, "_Vector3sVector", "std::vector<Eigen::Vector3s>", py::py_array_to_vectors<Eigen::Vector3s>);
   py::bind_vector<std::vector<double>>(m, "_VectorDouble");
   py::bind_vector<std::vector<int64_t>>(m, "_VectorInt64");
 
@@ -62,7 +66,6 @@ PYBIND11_MODULE(rko_lio_pybind, m) {
       .def_readwrite("deskew", &LIO::Config::deskew)
       .def_readwrite("max_iterations", &LIO::Config::max_iterations)
       .def_readwrite("voxel_size", &LIO::Config::voxel_size)
-      .def_readwrite("max_points_per_voxel", &LIO::Config::max_points_per_voxel)
       .def_readwrite("max_range", &LIO::Config::max_range)
       .def_readwrite("min_range", &LIO::Config::min_range)
       .def_readwrite("convergence_criterion", &LIO::Config::convergence_criterion)
@@ -77,7 +80,7 @@ PYBIND11_MODULE(rko_lio_pybind, m) {
       .def(py::init<const LIO::Config&>(), "config"_a)
       .def(
           "add_imu_measurement",
-          [](LIO& self, const Eigen::Vector3d& accel, const Eigen::Vector3d& gyro, const int64_t time_ns) {
+          [](LIO& self, const Eigen::Vector3s& accel, const Eigen::Vector3s& gyro, const int64_t time_ns) {
             self.add_imu_measurement(ImuControl{
                 .time = Nsec(time_ns),
                 .acceleration = accel,
@@ -87,9 +90,9 @@ PYBIND11_MODULE(rko_lio_pybind, m) {
           "acceleration"_a, "angular_velocity"_a, "time"_a)
       .def(
           "add_imu_measurement",
-          [](LIO& self, const Eigen::Matrix4d& extrinsic_imu2base, const Eigen::Vector3d& accel,
-             const Eigen::Vector3d& gyro, const int64_t time_ns) {
-            self.add_imu_measurement(Sophus::SE3d(extrinsic_imu2base), ImuControl{
+          [](LIO& self, const Eigen::Matrix4s& extrinsic_imu2base, const Eigen::Vector3s& accel,
+             const Eigen::Vector3s& gyro, const int64_t time_ns) {
+            self.add_imu_measurement(Sophus::SE3s(extrinsic_imu2base), ImuControl{
                                                                            .time = Nsec(time_ns),
                                                                            .acceleration = accel,
                                                                            .angular_velocity = gyro,
@@ -98,27 +101,32 @@ PYBIND11_MODULE(rko_lio_pybind, m) {
           "extrinsic_imu2base"_a, "acceleration"_a, "angular_velocity"_a, "time"_a)
       .def(
           "register_scan",
-          [](LIO& self, const std::vector<Eigen::Vector3d>& scan, const std::vector<int64_t>& timestamps_ns) {
-            TimestampVector timestamps(timestamps_ns.size());
-            std::transform(timestamps_ns.cbegin(), timestamps_ns.cend(), timestamps.begin(),
+          [](LIO& self, const std::vector<Eigen::Vector3s>& scan, const std::vector<int64_t>& timestamps_ns,
+             const int64_t start_time_ns, const int64_t end_time_ns) {
+            TimestampVector per_point(timestamps_ns.size());
+            std::transform(timestamps_ns.cbegin(), timestamps_ns.cend(), per_point.begin(),
                            [](const int64_t t) { return Nsec(t); });
-            return self.register_scan(scan, timestamps);
+            return self.register_scan(
+                scan,
+                Timestamps{.min = Nsec(start_time_ns), .max = Nsec(end_time_ns), .per_point = std::move(per_point)});
           },
-          "scan"_a, "timestamps"_a)
+          "scan"_a, "timestamps"_a, "start_time_ns"_a, "end_time_ns"_a)
       .def(
           "register_scan",
-          [](LIO& self, const Eigen::Matrix4d& extrinsic_lidar2base, const std::vector<Eigen::Vector3d>& scan,
-             const std::vector<int64_t>& timestamps_ns) {
-            TimestampVector timestamps(timestamps_ns.size());
-            std::transform(timestamps_ns.cbegin(), timestamps_ns.cend(), timestamps.begin(),
+          [](LIO& self, const Eigen::Matrix4s& extrinsic_lidar2base, const std::vector<Eigen::Vector3s>& scan,
+             const std::vector<int64_t>& timestamps_ns, const int64_t start_time_ns, const int64_t end_time_ns) {
+            TimestampVector per_point(timestamps_ns.size());
+            std::transform(timestamps_ns.cbegin(), timestamps_ns.cend(), per_point.begin(),
                            [](const int64_t t) { return Nsec(t); });
-            return self.register_scan(Sophus::SE3d(extrinsic_lidar2base), scan, timestamps);
+            return self.register_scan(
+                Sophus::SE3s(extrinsic_lidar2base), scan,
+                Timestamps{.min = Nsec(start_time_ns), .max = Nsec(end_time_ns), .per_point = std::move(per_point)});
           },
-          "extrinsic_lidar2base"_a, "scan"_a, "timestamps"_a)
-      .def("map_point_cloud", [](LIO& self) { return self.map.pointcloud(); })
+          "extrinsic_lidar2base"_a, "scan"_a, "timestamps"_a, "start_time_ns"_a, "end_time_ns"_a)
+      .def("map_point_cloud", [](LIO& self) { return self.map.points(); })
       .def("pose", [](LIO& self) { return self.lidar_state.pose.matrix(); })
       .def("imu_pose", [](LIO& self) { return self.imu_state.pose.matrix(); })
-      .def("imu_velocity", [](LIO& self) { return self.imu_state.velocity; })
+      .def("imu_velocity", [](LIO& self) { return self.imu_state.linear_velocity; })
       .def("imu_time", [](LIO& self) { return self.imu_state.time.count(); })
       .def("poses_with_timestamps",
            [](LIO& self) {
@@ -128,10 +136,12 @@ PYBIND11_MODULE(rko_lio_pybind, m) {
              // https://pybind11.readthedocs.io/en/stable/advanced/pycpp/numpy.html#direct-access
              auto pose_buf = poses.mutable_unchecked<2>();
              for (size_t i = 0; i < n; ++i) {
+               // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                const auto& [time, pose] = self.poses_with_timestamps[i];
                times_ns[i] = time.count();
-               const Eigen::Vector3d& trans = pose.translation();
-               const Eigen::Quaterniond& q = pose.unit_quaternion();
+               // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+               const Eigen::Vector3s& trans = pose.translation();
+               const Eigen::Quaternions& q = pose.unit_quaternion();
                pose_buf(i, 0) = trans.x();
                pose_buf(i, 1) = trans.y();
                pose_buf(i, 2) = trans.z();
