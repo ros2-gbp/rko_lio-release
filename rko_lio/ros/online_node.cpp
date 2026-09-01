@@ -22,10 +22,11 @@
  * SOFTWARE.
  */
 
-#include "threaded_node.hpp"
 #include "rko_lio/core/profiler.hpp"
+#include "threaded_node.hpp"
 
 namespace rko_lio::ros {
+namespace {
 class OnlineNode : public ThreadedNode {
 public:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub;
@@ -36,6 +37,7 @@ public:
   OnlineNode(OnlineNode&&) = delete;
   OnlineNode& operator=(const OnlineNode&) = delete;
   OnlineNode& operator=(OnlineNode&&) = delete;
+  ~OnlineNode() = default;
 
   explicit OnlineNode(const rclcpp::NodeOptions& options)
       : ThreadedNode("rko_lio_online_node", options), timer("RKO LIO Online Node") {
@@ -54,6 +56,7 @@ public:
     return node->get_node_base_interface();
   }
 };
+} // namespace
 } // namespace rko_lio::ros
 
 #include <rclcpp_components/register_node_macro.hpp>
