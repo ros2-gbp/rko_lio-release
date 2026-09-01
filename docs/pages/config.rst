@@ -2,7 +2,7 @@ Configuring the odometry
 ========================
 
 This page is a reference for runtime parameters.
-The first group -- the LIO core parameters -- is shared between the Python and ROS interfaces.
+The first group -- the LIO core parameters -- is shared between the Python and ROS interfaces, though a few defaults differ.
 The remaining groups (extrinsics, per-point timestamp handling, Python pipeline knobs, ROS launch knobs) cover the wrapper-specific bits.
 
 The defaults are sane and I've used them with success across a number of platforms and datasets.
@@ -60,10 +60,6 @@ These show up under the top level of a Python config and as ROS launch arguments
   Points closer than this are discarded.
   Useful if your platform shows up in the scan due to occlusions.
 
-- **max_points_per_voxel** (`int`, default ``20``)
-
-  Maximum number of points stored per voxel in the VDB map.
-
   Affects both memory and ICP data association.
 
   In case you need more runtime performance, you can reduce this.
@@ -73,7 +69,7 @@ These show up under the top level of a Python config and as ROS launch arguments
 
   Maximum distance threshold (meters) for ICP data associations.
 
-- **max_iterations** (`int`, default ``100``)
+- **max_iterations** (`int`, default ``50`` in ROS, ``100`` in Python)
 
   Limit on the number of iterations for ICP.
 
@@ -82,15 +78,16 @@ These show up under the top level of a Python config and as ROS launch arguments
 
 - **convergence_criterion** (`float`, default ``1e-5``)
 
-  Termination criterion for optimization.
+  Termination criterion for optimization. ICP stops once the cost changes by less than this
+  fraction of itself between two iterations.
   Lower (stricter) values will requires more ICP iterations.
 
-- **max_num_threads** (`int`, default ``0``)
+- **max_num_threads** (`int`, default ``1`` in ROS, ``0`` in Python)
 
   Only used to parallelize data association for ICP.
   ``0`` means autodetect based on hardware.
 
-  In case compute resources are a constraint, limit this to a few threads and, in order, ``max_points_per_voxel``, ``voxel_size``, ``max_range``, ``max_iterations`` are the parameters you probably care about.
+  In case compute resources are a constraint, limit this to a few threads and, in order, ``voxel_size``, ``max_range``, ``max_iterations`` are the parameters you probably care about.
 
 - **initialization_phase** (`bool`, default ``False``)
 
@@ -143,7 +140,7 @@ When are these required?
 
 - **ROS**: only if the TF tree isn't well defined or topic ``frame_id``\s don't match the TF tree. With a clean TF tree, the extrinsics are looked up automatically.
 - **Python rosbag dataloader**: only if the bag has no static TF tree. With a tree, the extrinsics are pulled from it.
-- **Python raw / HeLiPR dataloaders**: always required, supplied via the dataloader's own configuration mechanism (``transforms.yaml`` for raw, etc.).
+- **Python raw dataloader**: always required, supplied via the dataloader's own configuration mechanism (``transforms.yaml``).
 
 If you specify the extrinsics in a config but the dataloader / TF tree could also provide them, the config values take priority.
 
@@ -256,9 +253,9 @@ Mode-specific knobs
 
 These take effect only in the corresponding mode and otherwise warn that they are being ignored.
 
-- **async.max_lidar_buffer_size** (`int`, default ``50``)
+- **async.max_lidar_buffer_size** (`int`, default ``10``)
 
-  Threaded path only. Caps the lidar buffer; older frames are dropped past this.
+  Threaded path only. Caps the lidar buffer; the oldest buffered frame is dropped once it is full.
 
 - **seq.odom_at_imu_rate_topic** (default ``rko_lio/odom_at_imu_rate``)
 
@@ -275,7 +272,7 @@ Disk dumping and visualization
 
   On shutdown, dump the resolved configuration and the full trajectory under ``<results_dir>/<run_name>``. The folder name is auto-incremented to avoid overwrites.
 
-- **results_dir** (default ``results``), **run_name** (default ``rko_lio_odometry_run``)
+- **results_dir** (default ``results``), **run_name** (default ``rko_lio_run``)
 
   Where the dump goes and the subdirectory name within.
 
