@@ -2,8 +2,10 @@ name: Publish to PyPI.org
 on:
   release:
     types: [published]
-  push:
-    branches: ["master"]
+  schedule:
+    # Mondays 05:00 UTC
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
 jobs:
   cibuildwheel:
     name: Build py wheels on ${{ matrix.os }}
@@ -12,19 +14,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2022, macos-15]
+        os: ${{ fromJSON(github.event_name == 'release' && '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2022", "macos-15"]' || '["ubuntu-24.04", "windows-2022"]') }}
     steps:
       - uses: actions/checkout@v7
       - name: Build test wheels (only PRs)
         if: github.event_name != 'release'
-        uses: pypa/cibuildwheel@v4.1.0
+        uses: pypa/cibuildwheel@v4.1.1
         env: # build 1 build per platform just to make sure we can do it later when releasing
           CIBW_BUILD: "cp312-*"
         with:
           package-dir: ${{github.workspace}}/
       - name: Build all wheels (release)
         if: github.event_name == 'release'
-        uses: pypa/cibuildwheel@v4.1.0
+        uses: pypa/cibuildwheel@v4.1.1
         with:
           package-dir: ${{github.workspace}}/
       - uses: actions/upload-artifact@v7
