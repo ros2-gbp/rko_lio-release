@@ -28,8 +28,11 @@
  */
 
 #pragma once
-#include "voxel_hash_map.hpp"
+#include "process_timestamps.hpp"
 #include "util.hpp"
+#include "voxel_hash_map.hpp"
+
+#include <tbb/task_arena.h>
 
 /** Core namespace containing LIO data structures and state definitions. */
 namespace rko_lio::core {
@@ -45,22 +48,21 @@ public:
     size_t max_iterations = 100;
 
     /** Size of voxel grid (m). */
-    double voxel_size = 1.0;
+    Scalar voxel_size = 1.0;
 
     /** Max points per voxel. */
-    int max_points_per_voxel = 20;
 
     /** Maximum lidar range (m). */
-    double max_range = 100.0;
+    Scalar max_range = 100.0;
 
     /** Minimum lidar range (m). */
-    double min_range = 1.0;
+    Scalar min_range = 1.0;
 
     /** ICP convergence threshold. */
-    double convergence_criterion = 1e-5;
+    Scalar convergence_criterion = 1e-5;
 
     /** Max distance for correspondences (m). */
-    double max_correspondence_distance = 0.5;
+    Scalar max_correspondence_distance = 0.5;
 
     /** Thread count for data association (0 = automatic). */
     int max_num_threads = 0;
@@ -69,13 +71,13 @@ public:
     bool initialization_phase = false;
 
     /** Maximum expected jerk (m/s³). */
-    double max_expected_jerk = 3;
+    Scalar max_expected_jerk = 3;
 
     /** Enable double downsampling. */
     bool double_downsample = true;
 
     /** Minimum weight for orientation regularization. */
-    double min_beta = 200;
+    Scalar min_beta = 200;
   };
 
   /** Configuration parameters. */
@@ -84,6 +86,9 @@ public:
   /** Local map. */
   VoxelHashMap map;
 
+  /** Bounds ICP parallelism to max_num_threads without touching any other TBB user in the process. */
+  tbb::task_arena arena;
+
   /** Current LiDAR state estimate. */
   State lidar_state;
 
@@ -91,13 +96,16 @@ public:
   ImuBias imu_bias;
 
   /** Mean body acceleration estimate. */
-  Eigen::Vector3d mean_body_acceleration = Eigen::Vector3d::Zero();
+  Eigen::Vector3s mean_body_acceleration = Eigen::Vector3s::Zero();
 
   /** Covariance of body acceleration estimate. */
-  Eigen::Matrix3d body_acceleration_covariance = Eigen::Matrix3d::Identity();
+  Eigen::Matrix3s body_acceleration_covariance = Eigen::Matrix3s::Identity();
 
   /** IMU measurement statistics since last LiDAR frame. */
   IntervalStats interval_stats;
+
+  /** How many times `reset()` has been called. */
+  std::size_t reset_count = 0;
 
   explicit LIO(const Config& config_);
 
@@ -110,31 +118,35 @@ public:
    * @param extrinsic_imu2base Extrinsic transform from IMU to base frame.
    * @param raw_imu Raw IMU measurement.
    */
-  void add_imu_measurement(const Sophus::SE3d& extrinsic_imu2base, const ImuControl& raw_imu);
+  void add_imu_measurement(const Sophus::SE3s& extrinsic_imu2base, const ImuControl& raw_imu);
 
   /**
    * Register a LiDAR scan, applying deskewing based on the initial motion guess
    * and clipping points beyond valid range.
    * @param scan Input raw point cloud.
-   * @param timestamps Absolute timestamps corresponding to each scan point.
+   * @param timestamps Absolute per-point timestamps, plus the scan's own min/max, as already
+   *   computed by process_timestamps.
    * @return Deskewed and clipped point cloud.
    */
-  Vector3dVector register_scan(const Vector3dVector& scan, const TimestampVector& timestamps);
+  Vector3sVector register_scan(Vector3sVector scan, const Timestamps& timestamps);
 
   /**
    * Register a LiDAR scan for which the extrinsic calibration from lidar to base
    * has already been applied.
    * @param extrinsic_lidar2base Extrinsic from lidar to base frame.
    * @param scan Input raw point cloud.
-   * @param timestamps Absolute timestamps corresponding to each scan point.
+   * @param timestamps Absolute per-point timestamps, plus the scan's own min/max, as already
+   *   computed by process_timestamps.
    * @return Deskewed and clipped scan in the original lidar frame.
    */
-  Vector3dVector register_scan(const Sophus::SE3d& extrinsic_lidar2base,
-                               const Vector3dVector& scan,
-                               const TimestampVector& timestamps);
+  Vector3sVector
+  register_scan(const Sophus::SE3s& extrinsic_lidar2base, Vector3sVector scan, const Timestamps& timestamps);
+
+  /** Restart, treating the next scan as if it were the first. Forces `config.initialization_phase` off. */
+  void restart();
 
   /** Sequence of registered scan poses with corresponding timestamps. */
-  std::vector<std::pair<Nsec, Sophus::SE3d>> poses_with_timestamps;
+  std::vector<std::pair<Nsec, Sophus::SE3s>> poses_with_timestamps;
 
   /** Base-frame state propagated from IMU measurements. Runs ahead of `lidar_state` between scans; reset to the
    *  optimized lidar pose after each successful registration. Used for gravity compensation and for publishing
@@ -150,18 +162,18 @@ private:
   void initialize(const Nsec lidar_time);
 
   /** First-scan path: stamps state, optionally seeds the map, logs the pose. */
-  Vector3dVector bootstrap_first_scan(const Vector3dVector& scan, const Nsec current_lidar_time);
+  Vector3sVector bootstrap_first_scan(const Vector3sVector& scan, const Nsec current_lidar_time);
 
-  /** Average body acceleration and angular velocity over the IMU interval, with init-phase and no-IMU fallbacks. */
-  std::pair<Eigen::Vector3d, Eigen::Vector3d> motion_priors_from_imu(const Nsec current_lidar_time);
+  /** Motion prior for the coming scan, from the IMU interval average */
+  MotionPrior motion_prior_from_imu(const Nsec current_lidar_time);
 
   /** True if odometry initialization has been completed. */
-  bool _initialized = false;
+  bool initialized_ = false;
 
   /** Timestamp of the most recent real IMU measurement. */
-  Nsec _last_real_imu_time{0};
+  Nsec last_real_imu_time_{0};
 
   /** Angular velocity of last true IMU measurement expressed in base frame. */
-  Eigen::Vector3d _last_real_base_imu_ang_vel = Eigen::Vector3d::Zero();
+  Eigen::Vector3s last_real_base_imu_ang_vel_ = Eigen::Vector3s::Zero();
 };
 } // namespace rko_lio::core

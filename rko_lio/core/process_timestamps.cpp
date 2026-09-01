@@ -23,13 +23,13 @@
  */
 
 #include "process_timestamps.hpp"
+#include "error.hpp"
+#include <spdlog/spdlog.h>
+// stl
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
-#include <iomanip>
-#include <iostream>
-#include <stdexcept>
 
 namespace {
 using rko_lio::core::Nsec;
@@ -62,14 +62,15 @@ Timestamps timestamps_from_raw(const std::vector<double>& raw_timestamps, const 
     multiplier_to_ns = multiplier_to_seconds * 1e9;
   }
 
-  TimestampVector times_ns(raw_timestamps.size());
-  std::transform(raw_timestamps.cbegin(), raw_timestamps.cend(), times_ns.begin(),
-                 [multiplier_to_ns, source_is_ns](const double ts) {
-                   return raw_to_ns(ts, multiplier_to_ns, source_is_ns);
-                 });
-  return {.min = raw_to_ns(min_stamp, multiplier_to_ns, source_is_ns),
-          .max = raw_to_ns(max_stamp, multiplier_to_ns, source_is_ns),
-          .times = times_ns};
+  Timestamps timestamps{
+      .min = raw_to_ns(min_stamp, multiplier_to_ns, source_is_ns),
+      .max = raw_to_ns(max_stamp, multiplier_to_ns, source_is_ns),
+      .per_point = TimestampVector(raw_timestamps.size()),
+  };
+  std::transform(
+      raw_timestamps.cbegin(), raw_timestamps.cend(), timestamps.per_point.begin(),
+      [multiplier_to_ns, source_is_ns](const double ts) { return raw_to_ns(ts, multiplier_to_ns, source_is_ns); });
+  return timestamps;
 }
 } // namespace
 
@@ -78,7 +79,7 @@ Timestamps process_timestamps(const std::vector<double>& raw_timestamps,
                               const Nsec header_stamp,
                               const TimestampProcessingConfig& config) {
   if (raw_timestamps.empty()) {
-    throw std::invalid_argument("process_timestamps: raw_timestamps must not be empty.");
+    throw InputError("LiDAR timestamps are empty.");
   }
   Timestamps timestamps = timestamps_from_raw(raw_timestamps, config.multiplier_to_seconds);
 
@@ -93,7 +94,7 @@ Timestamps process_timestamps(const std::vector<double>& raw_timestamps,
       config.force_relative || (std::chrono::abs(timestamps.min) < 1ms) || (std::chrono::abs(timestamps.max) < 10ms);
 
   if (relative_stamps) {
-    std::transform(timestamps.times.cbegin(), timestamps.times.cend(), timestamps.times.begin(),
+    std::transform(timestamps.per_point.cbegin(), timestamps.per_point.cend(), timestamps.per_point.begin(),
                    [header_stamp](const Nsec ts) { return ts + header_stamp; });
     timestamps.min += header_stamp;
     timestamps.max += header_stamp;
@@ -101,21 +102,20 @@ Timestamps process_timestamps(const std::vector<double>& raw_timestamps,
   }
 
   // Error-out for unique/unsupported cases
-  std::cout << std::setprecision(18);
-  std::cout << "is_absolute: " << absolute_stamps << "\n";
-  std::cout << "is_relative: " << relative_stamps << "\n";
-  std::cout << "point times min (ns): " << timestamps.min.count() << "\n";
-  std::cout << "point times max (ns): " << timestamps.max.count() << "\n";
-  std::cout << "header_stamp (ns): " << header_stamp.count() << "\n";
-  std::cout << "TimestampProcessingConfig:\n"
-            << "  multiplier_to_seconds: " << config.multiplier_to_seconds << "\n"
-            << "  force_absolute: " << std::boolalpha << config.force_absolute << "\n"
-            << "  force_relative: " << std::boolalpha << config.force_relative << "\n"
-            << "  start and end difference thresholds to header time are 1 and 10 milliseconds. Please force a case if "
-               "those thresholds don't suit your sensor.\n"
-            << std::noboolalpha;
-  throw std::runtime_error(
-      "TimestampProcessingConfig does not cover this particular case of data. Please investigate, modify "
-      "the config, or open an issue.");
+  const double header_s = to_seconds(header_stamp);
+  const double min_s = to_seconds(timestamps.min);
+  const double max_s = to_seconds(timestamps.max);
+  spdlog::error("header: {:.6f} s\n"
+                "points: {:.6f} .. {:.6f} s  (span {:.4f} s)\n"
+                "|header-min| = {:.4f} s  (absolute if < 0.001 s)\n"
+                "|header-max| = {:.4f} s  (absolute if < 0.010 s)\n"
+                "|min| = {:.4f} s  (relative if < 0.001 s)\n"
+                "|max| = {:.4f} s  (relative if < 0.010 s)\n"
+                "multiplier_to_seconds: {}  (0 = autodetect)\n"
+                "Set force_absolute if point times share the header clock; "
+                "force_relative if they are offsets within the scan.",
+                header_s, min_s, max_s, max_s - min_s, std::abs(header_s - min_s), std::abs(header_s - max_s),
+                std::abs(min_s), std::abs(max_s), config.multiplier_to_seconds);
+  throw InputError("Cannot classify LiDAR timestamps as absolute or relative.");
 }
 } // namespace rko_lio::core
