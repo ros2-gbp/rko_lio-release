@@ -4,6 +4,9 @@ on:
     branches:
       - master
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -11,7 +14,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.x'
       - name: Install rosdoc2 and myst
@@ -21,7 +24,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y doxygen
       - name: Build documentation with rosdoc2
         run: |
-          rosdoc2 build --package-path $GITHUB_WORKSPACE
+          rosdoc2 build --package-path "$GITHUB_WORKSPACE"
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
