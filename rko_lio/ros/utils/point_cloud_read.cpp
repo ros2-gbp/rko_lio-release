@@ -23,19 +23,19 @@
  */
 
 #include "point_cloud_read.hpp"
+#include "rko_lio/core/error.hpp"
 // stl
 #include <cstddef>
 #include <functional>
-#include <stdexcept>
+#include <string>
 
 namespace rko_lio::ros::utils {
-using Vector3dVector = std::vector<Eigen::Vector3d>;
-using PointCloud2 = sensor_msgs::msg::PointCloud2;
-using PointField = sensor_msgs::msg::PointField;
+using sensor_msgs::msg::PointCloud2;
+using sensor_msgs::msg::PointField;
 
-Vector3dVector point_cloud2_to_eigen(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg) {
+core::Vector3sVector point_cloud2_to_eigen(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg) {
   const size_t point_count = static_cast<size_t>(msg->height) * msg->width;
-  Vector3dVector points;
+  core::Vector3sVector points;
   points.reserve(point_count);
   sensor_msgs::PointCloud2ConstIterator<float> msg_x(*msg, "x");
   sensor_msgs::PointCloud2ConstIterator<float> msg_y(*msg, "y");
@@ -46,36 +46,34 @@ Vector3dVector point_cloud2_to_eigen(const sensor_msgs::msg::PointCloud2::ConstS
   return points;
 }
 
-std::tuple<Vector3dVector, std::vector<double>>
-point_cloud2_to_eigen_with_timestamps(const PointCloud2::ConstSharedPtr& msg) {
+RawScan point_cloud2_to_eigen_with_timestamps(const PointCloud2::ConstSharedPtr& msg) {
   using sensor_msgs::PointCloud2ConstIterator;
   // getting points and time in a single cycle loop
   const size_t point_count = static_cast<size_t>(msg->height) * msg->width;
-  Vector3dVector points;
-  points.reserve(point_count);
+  RawScan scan;
+  scan.points.reserve(point_count);
+  scan.timestamps.reserve(point_count);
   PointCloud2ConstIterator<float> msg_x(*msg, "x");
   PointCloud2ConstIterator<float> msg_y(*msg, "y");
   PointCloud2ConstIterator<float> msg_z(*msg, "z");
 
-  std::vector<double> raw_timestamps;
-  raw_timestamps.reserve(point_count);
-
   const auto& timestamp_field = std::invoke([&msg]() -> PointField {
     for (const PointField& field : msg->fields) {
-      if ((field.name == "t" || field.name == "timestamp" || field.name == "time" || field.name == "stamps")) {
-        if (field.count != 0U) {
-          return field;
-        }
+      if ((field.name == "t" || field.name == "time" || field.name == "timestamp" || field.name == "timestamps" ||
+           field.name == "stamps") &&
+          field.count != 0U) {
+        return field;
       }
     }
-    throw std::invalid_argument("Point cloud needs timestamps for deskewing");
+    throw core::InputError(
+        "No per-point timestamp field (t/time/timestamp/timestamps/stamps). Disable deskew, or add timestamps.");
   });
 
   // templated lambda (auto) ftw
-  auto extract_points_and_timestamps = [&](auto&& time_iter) {
+  const auto extract_points_and_timestamps = [&](auto&& time_iter) {
     for (size_t i = 0; i < point_count; ++i, ++msg_x, ++msg_y, ++msg_z, ++time_iter) {
-      points.emplace_back(*msg_x, *msg_y, *msg_z);
-      raw_timestamps.emplace_back(static_cast<double>(*time_iter));
+      scan.points.emplace_back(*msg_x, *msg_y, *msg_z);
+      scan.timestamps.emplace_back(static_cast<double>(*time_iter));
     }
   };
 
@@ -96,9 +94,10 @@ point_cloud2_to_eigen_with_timestamps(const PointCloud2::ConstSharedPtr& msg) {
     break;
   }
   default:
-    throw std::invalid_argument("Unsupported timestamp field datatype. Please open an issue.");
+    throw core::InputError("Unsupported timestamp field datatype " + std::to_string(timestamp_field.datatype) +
+                           ". Please open an issue.");
   }
 
-  return {points, raw_timestamps};
+  return scan;
 }
 } // namespace rko_lio::ros::utils

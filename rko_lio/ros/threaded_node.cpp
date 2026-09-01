@@ -23,11 +23,9 @@
  */
 
 #include "threaded_node.hpp"
-#include "rko_lio/core/process_timestamps.hpp"
+#include "rko_lio/core/error.hpp"
 #include "rko_lio/core/profiler.hpp"
 #include "rko_lio/ros/utils/utils.hpp"
-// other
-#include <stdexcept>
 
 namespace {
 using namespace std::literals;
@@ -35,10 +33,11 @@ using namespace std::literals;
 
 namespace rko_lio::ros {
 
-ThreadedNode::ThreadedNode(const std::string& node_name, const rclcpp::NodeOptions& options) : BaseNode(node_name, options) {
-  max_lidar_buffer_size = static_cast<size_t>(node->declare_parameter<int>(
-      "async.max_lidar_buffer_size", static_cast<int>(max_lidar_buffer_size)));
-  registration_thread = std::jthread([this]() { registration_loop(); });
+ThreadedNode::ThreadedNode(const std::string& node_name, const rclcpp::NodeOptions& options)
+    : BaseNode(node_name, options) {
+  max_lidar_buffer_size = static_cast<size_t>(
+      node->declare_parameter<int>("async.max_lidar_buffer_size", static_cast<int>(max_lidar_buffer_size)));
+  registration_thread = std::jthread([this] { registration_loop(); });
 }
 
 void ThreadedNode::imu_callback(const sensor_msgs::msg::Imu::ConstSharedPtr& imu_msg) {
@@ -46,7 +45,7 @@ void ThreadedNode::imu_callback(const sensor_msgs::msg::Imu::ConstSharedPtr& imu
     return;
   }
   {
-    std::lock_guard lock(buffer_mutex);
+    const std::scoped_lock lock(buffer_mutex);
     imu_buffer.emplace(imu_msg_to_imu_data(*imu_msg));
     atomic_can_process = !lidar_buffer.empty() && imu_buffer.back().time > lidar_buffer.front().timestamps.max;
   }
@@ -59,43 +58,39 @@ void ThreadedNode::lidar_callback(const sensor_msgs::msg::PointCloud2::ConstShar
   if (!ensure_frame_and_extrinsics(lidar_frame, lidar_msg->header.frame_id, "LiDAR")) {
     return;
   }
-  {
-    std::lock_guard lock(buffer_mutex);
-    if (lidar_buffer.size() >= max_lidar_buffer_size) {
-      RCLCPP_WARN_STREAM(node->get_logger(), "Registration lidar buffer limit reached. Dropping frame.");
-      sync_condition_variable.notify_one();
-      return;
-    }
-  }
   try {
-    const auto [timestamps, scan] = process_lidar_msg(lidar_msg);
+    LidarScan scan = process_lidar_msg(lidar_msg);
     {
-      std::lock_guard lock(buffer_mutex);
-      lidar_buffer.emplace(timestamps, scan);
+      const std::scoped_lock lock(buffer_mutex);
+      if (lidar_buffer.size() >= max_lidar_buffer_size) {
+        RCLCPP_WARN_STREAM(node->get_logger(),
+                           "Registration lidar buffer limit reached. Dropping oldest buffered frame.");
+        lidar_buffer.pop();
+      }
+      lidar_buffer.push(std::move(scan));
       atomic_can_process = !imu_buffer.empty() && imu_buffer.back().time > lidar_buffer.front().timestamps.max;
     }
     if (atomic_can_process) {
       sync_condition_variable.notify_one();
     }
-  } catch (const std::invalid_argument& ex) {
-    RCLCPP_ERROR_STREAM(node->get_logger(), "Encountered error, dropping frame: Error. " << ex.what());
+  } catch (const core::InputError& ex) {
+    RCLCPP_ERROR_STREAM(node->get_logger(), "Dropping scan: " << ex.what());
   }
 }
 
 void ThreadedNode::registration_loop() {
   while (rclcpp::ok() && atomic_node_running) {
-    SCOPED_PROFILER("ROS Registration Loop");
     std::unique_lock buffer_lock(buffer_mutex);
-    sync_condition_variable.wait(buffer_lock, [this]() { return !atomic_node_running || atomic_can_process; });
+    sync_condition_variable.wait(buffer_lock, [this] { return !atomic_node_running || atomic_can_process; });
+    SCOPED_PROFILER("ROS Registration Loop");
     if (!atomic_node_running) {
       // node could have been killed after waiting on the cv
       break;
     }
-    LidarFrame frame = std::move(lidar_buffer.front());
+    LidarScan scan = std::move(lidar_buffer.front());
     lidar_buffer.pop();
     registration_busy = true;
-    const auto& [timestamps, scan] = frame;
-    const auto& [start_stamp, end_stamp, time_vector] = timestamps;
+    const core::Nsec end_stamp = scan.timestamps.max;
     for (; !imu_buffer.empty() && imu_buffer.front().time < end_stamp; imu_buffer.pop()) {
       const core::ImuControl& imu_data = imu_buffer.front();
       lio->add_imu_measurement(extrinsic_imu2base, imu_data);
@@ -106,14 +101,22 @@ void ThreadedNode::registration_loop() {
     buffer_lock.unlock(); // we dont touch the buffers anymore
 
     try {
-      const core::Vector3dVector deskewed_frame = register_scan_locked(scan, time_vector);
-      if (!deskewed_frame.empty()) {
-        // TODO: first frame is skipped and an empty frame is returned. improve how we handle this
-        publish_lidar_outputs(deskewed_frame);
+      const core::Vector3sVector deskewed_scan = register_scan_locked(std::move(scan.points), scan.timestamps);
+      if (!deskewed_scan.empty()) {
+        // TODO: first scan is skipped and an empty scan is returned. improve how we handle this
+        publish_lidar_outputs(deskewed_scan);
         publish_tf(lio->lidar_state);
       }
-    } catch (const std::invalid_argument& ex) {
-      RCLCPP_ERROR_STREAM(node->get_logger(), "Encountered error, dropping frame. Error: " << ex.what());
+    } catch (const core::InputError& ex) {
+      RCLCPP_ERROR_STREAM(node->get_logger(), "Dropping scan: " << ex.what());
+    } catch (const core::RegistrationError& ex) {
+      RCLCPP_ERROR_STREAM(node->get_logger(), "Registration failed (" << ex.what() << ").");
+      if (reset_on_registration_error) {
+        reset_odometry();
+      } else {
+        RCLCPP_WARN(node->get_logger(), "Set reset_on_registration_error:=true to reset odometry and continue.");
+        throw;
+      }
     }
     registration_busy = false;
   }

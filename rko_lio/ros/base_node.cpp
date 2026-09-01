@@ -23,48 +23,54 @@
  */
 
 #include "base_node.hpp"
-#include "rko_lio/core/process_timestamps.hpp"
+#include "rko_lio/ros/utils/spdlog_sink.hpp"
 #include "rko_lio/ros/utils/utils.hpp"
 // other
 #include <fstream>
-#include <iostream>
-#include <nlohmann/json.hpp>
+#include <iomanip>
+#include <limits>
+#include <spdlog/spdlog.h>
+#include <sstream>
 #include <stdexcept>
 
 namespace {
 using namespace std::literals;
-} // namespace
 
-namespace rko_lio::core {
-// necessary for serializing the config, including the namespacing
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LIO::Config,
-                                   deskew,
-                                   max_iterations,
-                                   voxel_size,
-                                   max_points_per_voxel,
-                                   max_range,
-                                   min_range,
-                                   convergence_criterion,
-                                   max_correspondence_distance,
-                                   max_num_threads,
-                                   initialization_phase,
-                                   max_expected_jerk,
-                                   double_downsample,
-                                   min_beta)
-} // namespace rko_lio::core
+std::string config_to_yaml(const rko_lio::core::LIO::Config& config) {
+  std::ostringstream ss;
+  ss << std::boolalpha << std::setprecision(std::numeric_limits<rko_lio::core::Scalar>::max_digits10);
+  ss << "deskew: " << config.deskew << "\n"
+     << "max_iterations: " << config.max_iterations << "\n"
+     << "voxel_size: " << config.voxel_size << "\n"
+     << "max_range: " << config.max_range << "\n"
+     << "min_range: " << config.min_range << "\n"
+     << "convergence_criterion: " << config.convergence_criterion << "\n"
+     << "max_correspondence_distance: " << config.max_correspondence_distance << "\n"
+     << "max_num_threads: " << config.max_num_threads << "\n"
+     << "initialization_phase: " << config.initialization_phase << "\n"
+     << "max_expected_jerk: " << config.max_expected_jerk << "\n"
+     << "double_downsample: " << config.double_downsample << "\n"
+     << "min_beta: " << config.min_beta << "\n";
+  return ss.str();
+}
+} // namespace
 
 namespace rko_lio::ros {
 
 core::ImuControl imu_msg_to_imu_data(const sensor_msgs::msg::Imu& imu_msg) {
   core::ImuControl imu_data;
   imu_data.time = utils::to_ns(imu_msg.header.stamp);
-  imu_data.angular_velocity = utils::ros_xyz_to_eigen_vector3d(imu_msg.angular_velocity);
-  imu_data.acceleration = utils::ros_xyz_to_eigen_vector3d(imu_msg.linear_acceleration);
+  imu_data.angular_velocity = utils::ros_xyz_to_eigen_vector(imu_msg.angular_velocity);
+  imu_data.acceleration = utils::ros_xyz_to_eigen_vector(imu_msg.linear_acceleration);
   return imu_data;
 }
 
 BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& options) {
   node = rclcpp::Node::make_shared(node_name, options);
+  auto logger = std::make_shared<spdlog::logger>("rko_lio", std::make_shared<utils::RclcppSink>(node->get_logger()));
+  logger->set_level(spdlog::level::trace);
+  spdlog::set_default_logger(std::move(logger));
+
   imu_topic = node->declare_parameter<std::string>("imu_topic");     // required
   lidar_topic = node->declare_parameter<std::string>("lidar_topic"); // required
   base_frame = node->declare_parameter<std::string>("base_frame");   // required
@@ -80,8 +86,11 @@ BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& opti
   tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*node);
 
   // publishing
-  const rclcpp::QoS publisher_qos((rclcpp::SystemDefaultsQoS().keep_last(1).durability_volatile()));
+  const rclcpp::QoS publisher_qos(rclcpp::SystemDefaultsQoS().keep_last(1).durability_volatile());
   odom_publisher = node->create_publisher<nav_msgs::msg::Odometry>(odom_topic, publisher_qos);
+  reset_count_publisher = node->create_publisher<std_msgs::msg::UInt32>(
+      "rko_lio/reset_count", rclcpp::SystemDefaultsQoS().keep_last(1).transient_local());
+  reset_count_publisher->publish(std_msgs::msg::UInt32());
 
   publish_lidar_acceleration = node->declare_parameter<bool>("publish_lidar_acceleration", publish_lidar_acceleration);
   if (publish_lidar_acceleration) {
@@ -100,33 +109,36 @@ BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& opti
     map_topic = node->declare_parameter<std::string>("map_topic", map_topic);
     const double publish_map_after_seconds =
         node->declare_parameter<double>("publish_map_after", core::to_seconds(publish_map_after));
-    publish_map_after = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>(publish_map_after_seconds));
+    publish_map_after =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(publish_map_after_seconds));
     map_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>(map_topic, publisher_qos);
-    map_publish_thead = std::jthread([this]() { publish_map_loop(); });
+    map_publish_thread = std::jthread([this] { publish_map_loop(); });
   }
 
   // lio params
   core::LIO::Config lio_config{};
   lio_config.deskew = node->declare_parameter<bool>("deskew", lio_config.deskew);
-  lio_config.max_iterations =
-      static_cast<size_t>(node->declare_parameter<int>("max_iterations", static_cast<int>(lio_config.max_iterations)));
-  lio_config.voxel_size = node->declare_parameter<double>("voxel_size", lio_config.voxel_size);
-  lio_config.max_points_per_voxel =
-      static_cast<int>(node->declare_parameter<int>("max_points_per_voxel", lio_config.max_points_per_voxel));
-  lio_config.max_range = node->declare_parameter<double>("max_range", lio_config.max_range);
-  lio_config.min_range = node->declare_parameter<double>("min_range", lio_config.min_range);
-  lio_config.convergence_criterion =
-      node->declare_parameter<double>("convergence_criterion", lio_config.convergence_criterion);
-  lio_config.max_correspondence_distance =
-      node->declare_parameter<double>("max_correspondence_distance", lio_config.max_correspondence_distance);
-  lio_config.max_num_threads =
-      static_cast<int>(node->declare_parameter<int>("max_num_threads", lio_config.max_num_threads));
+  lio_config.max_iterations = static_cast<size_t>(node->declare_parameter<int>("max_iterations", 50));
+  lio_config.voxel_size =
+      static_cast<core::Scalar>(node->declare_parameter<double>("voxel_size", lio_config.voxel_size));
+  if (node->declare_parameter<int>("max_points_per_voxel", -1) != -1) {
+    throw std::invalid_argument(
+        "max_points_per_voxel was removed, it is now fixed at compile time so the map can store points inline. "
+        "Use voxel_size to control map density instead: smaller keeps more points overall, larger keeps fewer.");
+  }
+  lio_config.max_range = static_cast<core::Scalar>(node->declare_parameter<double>("max_range", lio_config.max_range));
+  lio_config.min_range = static_cast<core::Scalar>(node->declare_parameter<double>("min_range", lio_config.min_range));
+  lio_config.convergence_criterion = static_cast<core::Scalar>(
+      node->declare_parameter<double>("convergence_criterion", lio_config.convergence_criterion));
+  lio_config.max_correspondence_distance = static_cast<core::Scalar>(
+      node->declare_parameter<double>("max_correspondence_distance", lio_config.max_correspondence_distance));
+  lio_config.max_num_threads = static_cast<int>(node->declare_parameter<int>("max_num_threads", 1));
   lio_config.initialization_phase =
       node->declare_parameter<bool>("initialization_phase", lio_config.initialization_phase);
-  lio_config.max_expected_jerk = node->declare_parameter<double>("max_expected_jerk", lio_config.max_expected_jerk);
+  lio_config.max_expected_jerk =
+      static_cast<core::Scalar>(node->declare_parameter<double>("max_expected_jerk", lio_config.max_expected_jerk));
   lio_config.double_downsample = node->declare_parameter<bool>("double_downsample", lio_config.double_downsample);
-  lio_config.min_beta = node->declare_parameter<double>("min_beta", lio_config.min_beta);
+  lio_config.min_beta = static_cast<core::Scalar>(node->declare_parameter<double>("min_beta", lio_config.min_beta));
   lio = std::make_unique<core::LIO>(lio_config);
 
   // Lidar per-point timestamp processing params, namespaced under lidar_timestamps.*
@@ -152,11 +164,14 @@ BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& opti
                          << (publish_deskewed_scan ? (" Publishing deskewed_cloud to " + deskewed_scan_topic + ".")
                                                    : ""));
 
+  reset_on_registration_error =
+      node->declare_parameter<bool>("reset_on_registration_error", reset_on_registration_error);
+
   // disk logging
   dump_results = node->declare_parameter<bool>("dump_results", dump_results);
   results_dir = node->declare_parameter<std::string>("results_dir", results_dir);
   run_name = node->declare_parameter<std::string>("run_name", run_name);
-  rclcpp::on_shutdown([this]() {
+  rclcpp::on_shutdown([this] {
     // i'll need to look into rclcpp::Context a bit more, but for now i think this callback should be called before
     // anything gets destroyed.
     if (dump_results) {
@@ -169,7 +184,7 @@ BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& opti
 }
 
 void BaseNode::parse_cli_extrinsics() {
-  auto parse_extrinsic = [this](const std::string& name, Sophus::SE3d& extrinsic) {
+  const auto parse_extrinsic = [this](const std::string& name, Sophus::SE3s& extrinsic) {
     const std::string param_name = "extrinsic_" + name + "2base_quat_xyzw_xyz";
     const std::vector<double> vec = node->declare_parameter<std::vector<double>>(param_name, std::vector<double>{});
 
@@ -183,11 +198,12 @@ void BaseNode::parse_cli_extrinsics() {
       }
       return false;
     }
-    Eigen::Quaterniond q(vec[3], vec[0], vec[1], vec[2]); // qw, qx, qy, qz
+    const Eigen::Quaternions q = Eigen::Quaterniond(vec.at(3), vec.at(0), vec.at(1), vec.at(2)).cast<core::Scalar>();
     if (q.norm() < 1e-6) {
-      throw std::runtime_error(name + " extrinsic quaternion has zero norm");
+      throw std::invalid_argument(name + " extrinsic quaternion has zero norm (extrinsic_" + name +
+                                  "2base_quat_xyzw_xyz).");
     }
-    extrinsic = Sophus::SE3d(q, Eigen::Vector3d(vec[4], vec[5], vec[6]));
+    extrinsic = Sophus::SE3s(q, Eigen::Vector3d(vec.at(4), vec.at(5), vec.at(6)).cast<core::Scalar>());
     RCLCPP_INFO_STREAM(node->get_logger(), "Parsed " << name << " extrinsic as: " << extrinsic.log().transpose());
     return true;
   };
@@ -201,9 +217,9 @@ bool BaseNode::ensure_frame_and_extrinsics(std::string& target_frame,
                                            std::string_view kind) {
   if (target_frame.empty()) {
     if (msg_frame.empty() && !extrinsics_set) {
-      throw std::runtime_error(std::string(kind) +
-                               " message header has no frame id and we need it to query TF for the extrinsics. "
-                               "Either specify the frame id or the extrinsic manually.");
+      throw std::invalid_argument(std::string(kind) +
+                                  " message header has no frame id and we need it to query TF for the extrinsics. "
+                                  "Either specify the frame id or the extrinsic manually.");
     }
     target_frame = msg_frame;
     RCLCPP_INFO_STREAM(node->get_logger(), "Parsed the " << kind << " frame id as: " << target_frame);
@@ -215,11 +231,11 @@ bool BaseNode::check_and_set_extrinsics() {
   if (extrinsics_set) {
     return true;
   }
-  const std::optional<Sophus::SE3d> imu_transform = utils::get_transform(tf_buffer, imu_frame, base_frame, 0s);
+  const std::optional<Sophus::SE3s> imu_transform = utils::get_transform(tf_buffer, imu_frame, base_frame, 0s);
   if (!imu_transform) {
     return false;
   }
-  const std::optional<Sophus::SE3d> lidar_transform = utils::get_transform(tf_buffer, lidar_frame, base_frame, 0s);
+  const std::optional<Sophus::SE3s> lidar_transform = utils::get_transform(tf_buffer, lidar_frame, base_frame, 0s);
   if (!lidar_transform) {
     return false;
   }
@@ -229,34 +245,38 @@ bool BaseNode::check_and_set_extrinsics() {
   return true;
 }
 
-std::tuple<core::Timestamps, core::Vector3dVector>
-BaseNode::process_lidar_msg(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& lidar_msg) const {
+LidarScan BaseNode::process_lidar_msg(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& lidar_msg) const {
   const core::Nsec header_stamp = utils::to_ns(lidar_msg->header.stamp);
   if (lio->config.deskew) {
-    const auto& [scan, raw_timestamps] = utils::point_cloud2_to_eigen_with_timestamps(lidar_msg);
-    const core::Timestamps& timestamps = core::process_timestamps(raw_timestamps, header_stamp, timestamp_proc_config);
-    return {timestamps, scan};
+    utils::RawScan scan = utils::point_cloud2_to_eigen_with_timestamps(lidar_msg);
+    return {
+        .timestamps = core::process_timestamps(scan.timestamps, header_stamp, timestamp_proc_config),
+        .points = std::move(scan.points),
+    };
   }
   RCLCPP_WARN_STREAM_ONCE(node->get_logger(), "Deskewing is disabled. Populating timestamps with static header time.");
-  const core::Vector3dVector scan = utils::point_cloud2_to_eigen(lidar_msg);
-  return {{.min = header_stamp, .max = header_stamp, .times = core::TimestampVector(scan.size(), header_stamp)}, scan};
+  LidarScan scan{
+      .timestamps = {.min = header_stamp, .max = header_stamp},
+      .points = utils::point_cloud2_to_eigen(lidar_msg),
+  };
+  scan.timestamps.per_point.assign(scan.points.size(), header_stamp);
+  return scan;
 }
 
-core::Vector3dVector BaseNode::register_scan_locked(const core::Vector3dVector& scan,
-                                                    const core::TimestampVector& time_vector) {
+core::Vector3sVector BaseNode::register_scan_locked(core::Vector3sVector scan, const core::Timestamps& timestamps) {
+  std::unique_lock lock(local_map_mutex, std::defer_lock);
   if (publish_local_map) {
-    std::lock_guard lock(local_map_mutex); // map publish thread may access map simultaneously
-    return lio->register_scan(extrinsic_lidar2base, scan, time_vector);
+    lock.lock(); // map publish thread may access map simultaneously
   }
-  return lio->register_scan(extrinsic_lidar2base, scan, time_vector);
+  return lio->register_scan(extrinsic_lidar2base, std::move(scan), timestamps);
 }
 
-void BaseNode::publish_lidar_outputs(const core::Vector3dVector& deskewed_frame) const {
+void BaseNode::publish_lidar_outputs(const core::Vector3sVector& deskewed_scan) const {
   if (publish_deskewed_scan) {
     std_msgs::msg::Header header;
     header.frame_id = lidar_frame;
     header.stamp = utils::to_ros_time(lio->lidar_state.time);
-    frame_publisher->publish(utils::eigen_to_point_cloud2(deskewed_frame, header));
+    frame_publisher->publish(utils::eigen_to_point_cloud2(deskewed_scan, header));
   }
   publish_odometry(lio->lidar_state, odom_publisher);
   if (publish_lidar_acceleration) {
@@ -271,8 +291,8 @@ void BaseNode::publish_odometry(const core::State& state,
   odom_msg.header.frame_id = odom_frame;
   odom_msg.child_frame_id = base_frame;
   odom_msg.pose.pose = utils::sophus_to_pose(state.pose);
-  utils::eigen_vector3d_to_ros_xyz(state.velocity, odom_msg.twist.twist.linear);
-  utils::eigen_vector3d_to_ros_xyz(state.angular_velocity, odom_msg.twist.twist.angular);
+  utils::eigen_vector_to_ros_xyz(state.linear_velocity, odom_msg.twist.twist.linear);
+  utils::eigen_vector_to_ros_xyz(state.angular_velocity, odom_msg.twist.twist.angular);
   publisher->publish(odom_msg);
 }
 
@@ -295,7 +315,7 @@ void BaseNode::publish_lidar_accel(const core::State& state) const {
   auto accel_msg = geometry_msgs::msg::AccelStamped();
   accel_msg.header.stamp = utils::to_ros_time(state.time);
   accel_msg.header.frame_id = base_frame;
-  utils::eigen_vector3d_to_ros_xyz(state.linear_acceleration, accel_msg.accel.linear);
+  utils::eigen_vector_to_ros_xyz(state.linear_acceleration, accel_msg.accel.linear);
   lidar_accel_publisher->publish(accel_msg);
 }
 
@@ -307,7 +327,7 @@ void BaseNode::publish_map_loop() {
       RCLCPP_WARN_ONCE(node->get_logger(), "Local map publish thread: Local map is empty.");
       continue;
     }
-    const core::Vector3dVector map_points = lio->map.pointcloud();
+    const core::Vector3sVector map_points = lio->map.points();
     lock.unlock(); // we don't access the local map anymore
     std_msgs::msg::Header map_header;
     map_header.stamp = node->now();
@@ -317,6 +337,23 @@ void BaseNode::publish_map_loop() {
 }
 
 BaseNode::~BaseNode() { atomic_node_running = false; }
+
+void BaseNode::reset_odometry() {
+  const bool forced_init_off = lio->config.initialization_phase;
+  std::unique_lock lock(local_map_mutex, std::defer_lock);
+  if (publish_local_map) {
+    lock.lock();
+  }
+  lio->restart();
+  RCLCPP_WARN_STREAM(node->get_logger(), "Odometry reset count: " << lio->reset_count);
+  std_msgs::msg::UInt32 reset_count_msg;
+  reset_count_msg.data = static_cast<std::uint32_t>(lio->reset_count);
+  reset_count_publisher->publish(reset_count_msg);
+  if (forced_init_off) {
+    RCLCPP_WARN(node->get_logger(),
+                "initialization_phase was enabled; it is off after reset because static start is not guaranteed.");
+  }
+}
 
 void BaseNode::dump_results_to_disk(const std::filesystem::path& results_dir, const std::string& run_name) const {
   try {
@@ -328,27 +365,30 @@ void BaseNode::dump_results_to_disk(const std::filesystem::path& results_dir, co
       output_dir = results_dir / (run_name + "_" + std::to_string(index));
     }
     std::filesystem::create_directory(output_dir);
-    const std::filesystem::path output_file = output_dir / (run_name + "_tum_" + std::to_string(index) + ".txt");
+    std::string tum_name = run_name + "_tum_" + std::to_string(index);
+    if (lio->reset_count > 0) {
+      tum_name += "_resets" + std::to_string(lio->reset_count);
+    }
+    const std::filesystem::path output_file = output_dir / (tum_name + ".txt");
     // dump poses
     if (std::ofstream file(output_file); file.is_open()) {
       for (const auto& [timestamp, pose] : lio->poses_with_timestamps) {
-        const Eigen::Vector3d& translation = pose.translation();
-        const Eigen::Quaterniond& quaternion = pose.so3().unit_quaternion();
+        const Eigen::Vector3s& translation = pose.translation();
+        const Eigen::Quaternions& quaternion = pose.so3().unit_quaternion();
         file << std::fixed << std::setprecision(6) << core::to_seconds(timestamp) << " " << translation.x() << " "
              << translation.y() << " " << translation.z() << " " << quaternion.x() << " " << quaternion.y() << " "
              << quaternion.z() << " " << quaternion.w() << "\n";
       }
-      std::cout << "Poses written to " << std::filesystem::absolute(output_file) << "\n";
+      spdlog::info("Poses written to {}", std::filesystem::absolute(output_file).string());
     }
     // dump config
-    const nlohmann::json json_config = {{"config", lio->config}};
-    const std::filesystem::path config_file = output_dir / "config.json";
+    const std::filesystem::path config_file = output_dir / "config.yaml";
     if (std::ofstream file(config_file); file.is_open()) {
-      file << json_config.dump(4);
-      std::cout << "Configuration written to " << config_file << "\n";
+      file << config_to_yaml(lio->config);
+      spdlog::info("Configuration written to {}", config_file.string());
     }
   } catch (const std::filesystem::filesystem_error& ex) {
-    std::cerr << "[WARNING] Cannot write files to disk, encountered filesystem error: " << ex.what() << "\n";
+    spdlog::warn("Cannot write files to disk, encountered filesystem error: {}", ex.what());
   }
 }
 
