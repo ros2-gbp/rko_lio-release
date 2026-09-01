@@ -27,6 +27,8 @@
 #include <Eigen/Core>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <rko_lio/core/util.hpp>
+
 #include <optional>
 #include <rclcpp/logger.hpp>
 #include <rclcpp/logging.hpp>
@@ -36,14 +38,13 @@
 #include <tf2_ros/buffer.hpp>
 
 namespace rko_lio::ros::utils {
-template <typename Scalar = double>
-inline geometry_msgs::msg::Pose sophus_to_pose(const Sophus::SE3<Scalar>& T) {
+inline geometry_msgs::msg::Pose sophus_to_pose(const Sophus::SE3s& T) {
   geometry_msgs::msg::Pose t;
   t.position.x = T.translation().x();
   t.position.y = T.translation().y();
   t.position.z = T.translation().z();
 
-  Eigen::Quaternion<Scalar> q(T.so3().unit_quaternion());
+  Eigen::Quaternions q(T.so3().unit_quaternion());
   t.orientation.x = q.x();
   t.orientation.y = q.y();
   t.orientation.z = q.z();
@@ -52,14 +53,13 @@ inline geometry_msgs::msg::Pose sophus_to_pose(const Sophus::SE3<Scalar>& T) {
   return t;
 }
 
-template <typename Scalar = double>
-inline geometry_msgs::msg::Transform sophus_to_transform(const Sophus::SE3<Scalar>& T) {
+inline geometry_msgs::msg::Transform sophus_to_transform(const Sophus::SE3s& T) {
   geometry_msgs::msg::Transform t;
   t.translation.x = T.translation().x();
   t.translation.y = T.translation().y();
   t.translation.z = T.translation().z();
 
-  Eigen::Quaternion<Scalar> q(T.so3().unit_quaternion());
+  Eigen::Quaternions q(T.so3().unit_quaternion());
   t.rotation.x = q.x();
   t.rotation.y = q.y();
   t.rotation.z = q.z();
@@ -68,27 +68,24 @@ inline geometry_msgs::msg::Transform sophus_to_transform(const Sophus::SE3<Scala
   return t;
 }
 
-template <typename Scalar = double>
-inline Sophus::SE3<Scalar> transform_to_sophus(const geometry_msgs::msg::TransformStamped& transform) {
+inline Sophus::SE3s transform_to_sophus(const geometry_msgs::msg::TransformStamped& transform) {
   const auto& t = transform.transform;
-  return {typename Sophus::SE3<Scalar>::QuaternionType(t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z),
-          typename Sophus::SE3<Scalar>::Point(t.translation.x, t.translation.y, t.translation.z)};
+  return {Eigen::Quaterniond(t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z).cast<core::Scalar>(),
+          Eigen::Vector3d(t.translation.x, t.translation.y, t.translation.z).cast<core::Scalar>()};
 }
 
-template <typename Scalar = double>
-std::optional<Sophus::SE3<Scalar>>
-get_transform(const std::shared_ptr<tf2_ros::Buffer>& tf_buffer,
-              const std::string& from_frame,
-              const std::string& to_frame,
-              const std::chrono::nanoseconds time,
-              const std::chrono::nanoseconds timeout = std::chrono::nanoseconds(0)) {
+inline std::optional<Sophus::SE3s> get_transform(const std::shared_ptr<tf2_ros::Buffer>& tf_buffer,
+                                                 const std::string& from_frame,
+                                                 const std::string& to_frame,
+                                                 const std::chrono::nanoseconds time,
+                                                 const std::chrono::nanoseconds timeout = std::chrono::nanoseconds(0)) {
   geometry_msgs::msg::TransformStamped from_to_transform;
   const tf2::TimePoint tf_time{time};
   const tf2::Duration tf_timeout{timeout};
   try {
     tf_buffer->_validateFrameId("from_frame", from_frame);
     tf_buffer->_validateFrameId("to frame", to_frame);
-    std::unique_ptr<std::string> error_str = std::make_unique<std::string>();
+    const std::unique_ptr<std::string> error_str = std::make_unique<std::string>();
     if (!tf_buffer->canTransform(to_frame, from_frame, tf_time, tf_timeout, error_str.get())) {
       RCLCPP_WARN_STREAM(rclcpp::get_logger("transform lookup"),
                          "Cannot transform from: " << from_frame << " -> to: " << to_frame
@@ -96,7 +93,7 @@ get_transform(const std::shared_ptr<tf2_ros::Buffer>& tf_buffer,
       return std::nullopt;
     }
     from_to_transform = tf_buffer->lookupTransform(to_frame, from_frame, tf_time);
-    return transform_to_sophus<Scalar>(from_to_transform);
+    return transform_to_sophus(from_to_transform);
   } catch (const tf2::InvalidArgumentException& e) {
     RCLCPP_WARN_STREAM(rclcpp::get_logger("transform lookup"),
                        "TF lookup error (InvalidArgumentException): " << e.what());

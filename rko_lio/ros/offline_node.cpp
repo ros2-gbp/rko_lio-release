@@ -22,9 +22,10 @@
  * SOFTWARE.
  */
 
-#include "threaded_node.hpp"
 #include "rko_lio/core/profiler.hpp"
 #include "rko_lio/ros/utils/rosbag.hpp"
+#include "threaded_node.hpp"
+#include <spdlog/spdlog.h>
 // other
 #include <std_msgs/msg/float32_multi_array.hpp>
 
@@ -41,6 +42,7 @@ using BagProgressPublisher = rclcpp::Publisher<std_msgs::msg::Float32MultiArray>
 } // namespace
 
 namespace rko_lio::ros {
+namespace {
 class OfflineNode : public ThreadedNode {
 public:
   std::unique_ptr<utils::BufferableBag> bag;
@@ -52,13 +54,14 @@ public:
   std::chrono::steady_clock::time_point bag_start_time;
 
   explicit OfflineNode(const rclcpp::NodeOptions& options)
-      : ThreadedNode("rko_lio_offline_node", options), bag_start_time(std::chrono::steady_clock::now()) {
-    // bag reading
-    const tf2::Duration skip_to_time = tf2::durationFromSec(node->declare_parameter<double>("skip_to_time", 0.0));
-    bag = std::make_unique<utils::BufferableBag>(node->declare_parameter<std::string>("bag_path"),
-                                                 std::make_shared<utils::BufferableBag::TFBridge>(*node),
-                                                 std::vector<std::string>{imu_topic, lidar_topic}, skip_to_time);
-    total_bag_msgs = bag->message_count();
+      : ThreadedNode("rko_lio_offline_node", options),
+        bag(std::make_unique<utils::BufferableBag>(
+            node->declare_parameter<std::string>("bag_path"),
+            std::make_shared<utils::BufferableBag::TFBridge>(*node),
+            std::vector<std::string>{imu_topic, lidar_topic},
+            tf2::durationFromSec(node->declare_parameter<double>("skip_to_time", 0.0)))),
+        total_bag_msgs(static_cast<float>(bag->message_count())),
+        bag_start_time(std::chrono::steady_clock::now()) {
     bag_progress_publisher = node->create_publisher<std_msgs::msg::Float32MultiArray>("rko_lio/bag_progress", 10);
   }
 
@@ -72,9 +75,9 @@ public:
 
     std_msgs::msg::Float32MultiArray progress_msg;
     progress_msg.layout.dim.resize(1);
-    progress_msg.layout.dim[0].label = "percent_complete,seconds_remaining";
-    progress_msg.layout.dim[0].size = 2;
-    progress_msg.layout.dim[0].stride = 2;
+    progress_msg.layout.dim.at(0).label = "percent_complete,seconds_remaining";
+    progress_msg.layout.dim.at(0).size = 2;
+    progress_msg.layout.dim.at(0).stride = 2;
     progress_msg.data = {percent_complete, seconds_remaining};
 
     bag_progress_publisher->publish(progress_msg);
@@ -83,9 +86,16 @@ public:
   void run() {
     while (rclcpp::ok() && !bag->finished()) {
       {
-        if (lidar_buffer.size() >= 0.9 * max_lidar_buffer_size) {
+        size_t buffered_frames = 0;
+        bool registration_can_drain = false;
+        {
+          const std::scoped_lock<std::mutex> lock(buffer_mutex);
+          buffered_frames = lidar_buffer.size();
+          registration_can_drain = atomic_can_process.load() || registration_busy.load();
+        }
+        if (2 * buffered_frames >= max_lidar_buffer_size && registration_can_drain) {
           RCLCPP_WARN_STREAM_ONCE(node->get_logger(),
-                                  "Lidar buffer size: " << lidar_buffer.size()
+                                  "Lidar buffer size: " << buffered_frames
                                                         << ", max_lidar_buffer_size: " << max_lidar_buffer_size
                                                         << ", throttling the bag reading thread as it's too fast.\n");
           // this is a hack. can be improved
@@ -112,8 +122,11 @@ public:
     while (rclcpp::ok()) {
       {
         // wait for the registration buffer to drain - leftover IMU after the last lidar scan is harmless
-        std::lock_guard<std::mutex> lock(buffer_mutex);
+        const std::scoped_lock<std::mutex> lock(buffer_mutex);
         if (lidar_buffer.empty() && !registration_busy.load()) {
+          break;
+        }
+        if (!atomic_can_process.load() && !registration_busy.load()) {
           break;
         }
       }
@@ -121,13 +134,19 @@ public:
     }
   }
 };
+} // namespace
 } // namespace rko_lio::ros
 
-int main(int argc, char** argv) {
-  const rko_lio::core::Timer timer("RKO LIO Offline Node");
-  rclcpp::init(argc, argv);
-  auto node = rko_lio::ros::OfflineNode(rclcpp::NodeOptions());
-  node.run();
-  rclcpp::shutdown();
+int main(int argc, char* const* argv) {
+  try {
+    const rko_lio::core::Timer timer("RKO LIO Offline Node");
+    rclcpp::init(argc, argv);
+    auto node = rko_lio::ros::OfflineNode(rclcpp::NodeOptions());
+    node.run();
+    rclcpp::shutdown();
+  } catch (const std::exception& error) {
+    spdlog::critical("{}", error.what());
+    return 1;
+  }
   return 0;
 }
