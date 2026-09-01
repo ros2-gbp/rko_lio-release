@@ -24,7 +24,6 @@
 
 #pragma once
 #include "rko_lio/core/lio.hpp"
-#include "rko_lio/core/process_timestamps.hpp"
 // stl
 #include <atomic>
 #include <filesystem>
@@ -33,7 +32,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <tuple>
 // ros
 #include <geometry_msgs/msg/accel_stamped.hpp>
 #include <geometry_msgs/msg/accel_with_covariance_stamped.hpp>
@@ -42,59 +40,64 @@
 #include <rclcpp/node_options.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/u_int32.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_broadcaster.hpp>
 #include <tf2_ros/transform_listener.hpp>
 
 namespace rko_lio::ros {
+
+struct LidarScan {
+  core::Timestamps timestamps;
+  core::Vector3sVector points;
+};
 // Shared helper used by both the threaded and sequential nodes.
 core::ImuControl imu_msg_to_imu_data(const sensor_msgs::msg::Imu& imu_msg);
 
 class BaseNode {
 public:
-  rclcpp::Node::SharedPtr node;
+  // field order minimises padding
+  Sophus::SE3s extrinsic_imu2base;
+  Sophus::SE3s extrinsic_lidar2base;
+
   std::unique_ptr<core::LIO> lio;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster;
+  core::Nsec publish_map_after = std::chrono::seconds(1);
+  rclcpp::Node::SharedPtr node;
   core::TimestampProcessingConfig timestamp_proc_config;
-
-  std::string imu_topic;
-  std::string imu_frame = ""; // default: get from the first imu message
-  std::string lidar_topic;
-  std::string lidar_frame = ""; // default: get from the first lidar message
-  std::string base_frame;
-  std::string odom_frame = "odom";
-  std::string odom_topic = "rko_lio/odom";
-  std::string map_topic = "rko_lio/local_map";
-  std::string deskewed_scan_topic = "rko_lio/frame";
-
-  bool dump_results = false;
-  std::string results_dir = "results";
-  std::string run_name = "rko_lio_run";
-
-  bool invert_odom_tf = false;
-  bool publish_lidar_acceleration = false;
-  bool publish_deskewed_scan = false;
-  bool publish_local_map = false;
-
-  Sophus::SE3d extrinsic_imu2base;
-  Sophus::SE3d extrinsic_lidar2base;
-  bool extrinsics_set = false;
-
   std::shared_ptr<tf2_ros::TransformListener> tf_listener;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer;
-  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster;
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr frame_publisher;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_publisher;
   rclcpp::Publisher<geometry_msgs::msg::AccelStamped>::SharedPtr lidar_accel_publisher;
+  rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr reset_count_publisher;
 
-  // map publish thread
-  std::jthread map_publish_thead;
-  core::Nsec publish_map_after = std::chrono::seconds(1);
+  std::string imu_topic;
+  std::string imu_frame; // default: get from the first imu message
+  std::string lidar_topic;
+  std::string lidar_frame; // default: get from the first lidar message
+  std::string base_frame;
+  std::string odom_frame = "odom";
+  std::string odom_topic = "rko_lio/odom";
+  std::string map_topic = "rko_lio/local_map";
+  std::string deskewed_scan_topic = "rko_lio/frame";
+  std::string results_dir = "results";
+  std::string run_name = "rko_lio_run";
+
   std::mutex local_map_mutex;
 
-  // shutdown flag
+  bool dump_results = false;
+  bool invert_odom_tf = false;
+  bool publish_lidar_acceleration = false;
+  bool publish_deskewed_scan = false;
+  bool publish_local_map = false;
+  bool extrinsics_set = false;
+  bool reset_on_registration_error = false;
+
   std::atomic<bool> atomic_node_running = true;
+  std::jthread map_publish_thread;
 
   BaseNode() = delete;
   BaseNode(const std::string& node_name, const rclcpp::NodeOptions& options);
@@ -105,16 +108,13 @@ public:
   // Parse the message's frame_id into target_frame on first sight, throw if neither header nor static extrinsics
   // are usable, and report whether extrinsics are now set. Extrinsics are assumed static; if they change, switch
   // to querying TF inline per-message.
-  bool ensure_frame_and_extrinsics(std::string& target_frame,
-                                   const std::string& msg_frame,
-                                   std::string_view kind);
+  bool ensure_frame_and_extrinsics(std::string& target_frame, const std::string& msg_frame, std::string_view kind);
 
-  std::tuple<core::Timestamps, core::Vector3dVector>
-  process_lidar_msg(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& lidar_msg) const;
+  LidarScan process_lidar_msg(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& lidar_msg) const;
 
-  core::Vector3dVector register_scan_locked(const core::Vector3dVector& scan, const core::TimestampVector& time_vector);
+  core::Vector3sVector register_scan_locked(core::Vector3sVector scan, const core::Timestamps& timestamps);
 
-  void publish_lidar_outputs(const core::Vector3dVector& deskewed_frame) const;
+  void publish_lidar_outputs(const core::Vector3sVector& deskewed_scan) const;
 
   void publish_odometry(const core::State& state,
                         const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr& publisher) const;
@@ -122,6 +122,8 @@ public:
   void publish_lidar_accel(const core::State& state) const;
   void publish_map_loop();
   void dump_results_to_disk(const std::filesystem::path& results_dir, const std::string& run_name) const;
+
+  void reset_odometry();
 
   ~BaseNode();
   BaseNode(const BaseNode&) = delete;

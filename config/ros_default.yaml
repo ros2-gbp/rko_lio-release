@@ -13,6 +13,7 @@
 odom_topic: /rko_lio/odom
 odom_frame: odom
 invert_odom_tf: false
+# reset_on_registration_error: false
 publish_local_map: true
 map_topic: /rko_lio/local_map
 publish_deskewed_scan: true
@@ -24,12 +25,11 @@ odom_at_imu_rate: false
 # lio config
 deskew: true
 voxel_size: 1.0
-max_points_per_voxel: 20
 max_range: 100.0
 min_range: 1.0
 max_correspondence_distance: 0.5
 convergence_criterion: 0.00001
-max_num_threads: 0
+max_num_threads: 1
 initialization_phase: false
 double_downsample: true
 max_expected_jerk: 3.0
