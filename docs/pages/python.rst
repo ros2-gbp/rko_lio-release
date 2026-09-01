@@ -66,7 +66,7 @@ Or use the convenience recipes in the `Makefile <Makefile>`_:
 
 The Python build uses ``scikit-build-core``.
 You only need Python >= 3.10 and ``pip`` (or another frontend).
-Core C++ dependencies (Eigen, Sophus, TBB, nlohmann_json) are fetched automatically; tsl::robin_map is always fetched.
+Core C++ dependencies (Eigen, Sophus, TBB, robin-map, spdlog) are fetched automatically.
 If you want to build against system libraries instead, set ``RKO_LIO_FETCH_CONTENT_DEPS=OFF`` via the scikit-build CMake args -- the default for the Python build is ``ON``.
 
 Usage
@@ -86,7 +86,7 @@ The most common invocation is just:
 
 Add ``-v`` to enable visualization (uses `rerun <https://rerun.io>`_; install the ``rerun-sdk`` extra).
 
-There are three dataloaders: ``rosbag`` (ROS1 or ROS2), ``raw``, and ``HeLiPR`` (deprecated). The system tries to detect the right one from the data path; choose explicitly with ``-d``.
+There are two dataloaders: ``rosbag`` (ROS1 or ROS2) and ``raw``. The system tries to detect the right one from the data path; choose explicitly with ``-d``.
 
 A config file is passed with ``--config`` / ``-c``.
 Dump a default config to inspect or edit:
@@ -121,9 +121,6 @@ Dataloaders
    :no-index:
 
 .. automodule:: rko_lio.dataloaders.raw
-   :no-index:
-
-.. automodule:: rko_lio.dataloaders.helipr
    :no-index:
 
 Python API
