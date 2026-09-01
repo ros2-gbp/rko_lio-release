@@ -35,7 +35,6 @@
 namespace py = pybind11;
 #include <pybind11/eigen.h>
 #include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 
@@ -55,23 +54,23 @@ py::class_<Vector, holder_type> bind_vector_without_repr(py::module& m, std::str
 
 // - This function is used by Pybind for std::vector<SomeEigenType> constructor.
 //   This optional constructor is added to avoid too many Python <-> C++ API
-//   calls when the vector size is large using the default biding method.
-//   Pybind matches np.float64 array to py::array_t<double> buffer.
-// - Directly using templates for the py::array_t<double> and py::array_t<int>
-//   and etc. doesn't work. The current solution is to explicitly implement
-//   bindings for each py array types.
+//   calls when the vector size is large using the default binding method.
+// - The numpy dtype follows the eigen vector's scalar, so a matching array is taken
+//   straight through and anything else is converted once by forcecast.
 template <typename EigenVector>
 std::vector<EigenVector>
-py_array_to_vectors_double(py::array_t<double, py::array::c_style | py::array::forcecast> array) {
-  int64_t eigen_vector_size = EigenVector::SizeAtCompileTime;
+py_array_to_vectors(const py::array_t<typename EigenVector::Scalar, py::array::c_style | py::array::forcecast>& array) {
+  const int64_t eigen_vector_size = EigenVector::SizeAtCompileTime;
   if (array.ndim() != 2 || array.shape(1) != eigen_vector_size) {
     throw py::cast_error();
   }
   std::vector<EigenVector> eigen_vectors(array.shape(0));
-  auto array_unchecked = array.mutable_unchecked<2>();
+  const auto array_unchecked = array.template unchecked<2>();
+  // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
   for (auto i = 0; i < array_unchecked.shape(0); ++i) {
-    eigen_vectors[i] = Eigen::Map<EigenVector>(&array_unchecked(i, 0));
+    eigen_vectors[i] = Eigen::Map<const EigenVector>(&array_unchecked(i, 0));
   }
+  // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
   return eigen_vectors;
 }
 
@@ -85,12 +84,12 @@ py::class_<Vector, holder_type> pybind_eigen_vector_of_vector(py::module& m,
                                                               const std::string& bind_name,
                                                               const std::string& repr_name,
                                                               InitFunc init_func) {
-  using Scalar = typename EigenVector::Scalar;
+  using Scalar = EigenVector::Scalar;
   auto vec =
       py::bind_vector_without_repr<std::vector<EigenVector>>(m, bind_name, py::buffer_protocol(), py::module_local());
   vec.def(py::init(init_func));
   vec.def_buffer([](std::vector<EigenVector>& v) -> py::buffer_info {
-    size_t rows = EigenVector::RowsAtCompileTime;
+    const size_t rows = EigenVector::RowsAtCompileTime;
     return py::buffer_info(v.data(), sizeof(Scalar), py::format_descriptor<Scalar>::format(), 2, {v.size(), rows},
                            {sizeof(EigenVector), sizeof(Scalar)});
   });
