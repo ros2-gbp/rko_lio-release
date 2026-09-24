@@ -36,6 +36,7 @@
 #include <geometry_msgs/msg/accel_stamped.hpp>
 #include <geometry_msgs/msg/accel_with_covariance_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp/context.hpp>
 #include <rclcpp/node.hpp>
 #include <rclcpp/node_options.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -82,7 +83,7 @@ public:
   std::string odom_frame = "odom";
   std::string odom_topic = "rko_lio/odom";
   std::string map_topic = "rko_lio/local_map";
-  std::string deskewed_scan_topic = "rko_lio/frame";
+  std::string deskewed_scan_topic = "rko_lio/deskewed_scan";
   std::string results_dir = "results";
   std::string run_name = "rko_lio_run";
 
@@ -97,6 +98,7 @@ public:
   bool reset_on_registration_error = false;
 
   std::atomic<bool> atomic_node_running = true;
+  rclcpp::OnShutdownCallbackHandle shutdown_handle;
   std::jthread map_publish_thread;
 
   BaseNode() = delete;
