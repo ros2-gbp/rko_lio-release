@@ -23,6 +23,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import launch_ros.actions
 import yaml
@@ -40,10 +41,10 @@ offline_only_parameters = [
         "required": True,
     },
     {
-        "name": "skip_to_time",
+        "name": "skip_first_seconds",
         "default": "0.0",
         "type": "float",
-        "description": "[offline only] Skip to timestamp in the bag (seconds)",
+        "description": "[offline only] Skip this many seconds from the start of the bag",
     },
 ]
 
@@ -189,7 +190,7 @@ configurable_parameters = [
     },
     {
         "name": "deskewed_scan_topic",
-        "default": "rko_lio/frame",
+        "default": "rko_lio/deskewed_scan",
         "description": "Deskewed scan topic. Published if publish_deskewed_scan is true",
     },
     {
@@ -310,6 +311,12 @@ configurable_parameters = [
         "description": "RViz config file path. If it's not the default value, note that it will be passed to rviz as is.",
     },
     {
+        "name": "use_sim_time",
+        "default": "false",
+        "type": "bool",
+        "description": "Use the /clock topic (bag replay with --clock)",
+    },
+    {
         "launch_only": True,
         "name": "log_level",
         "default": "info",
@@ -319,7 +326,7 @@ configurable_parameters = [
 ]
 
 
-def fail(*lines):
+def fail(*lines) -> NoReturn:
     print("\n\n" + "=" * 40)
     for line in lines:
         print(line)
@@ -516,6 +523,17 @@ def prepare_rviz_config(rviz_config_file: Path, parameters: dict) -> Path:
     return Path(tmp.name)
 
 
+def rko_lio_node(parameters: dict, executable: str, log_level):
+    return launch_ros.actions.Node(
+        package="rko_lio",
+        executable=executable,
+        parameters=[node_parameters(parameters)],
+        output="screen",
+        arguments=["--ros-args", "--log-level", log_level],
+        emulate_tty=True,
+    )
+
+
 def launch_setup(context, *args, **kwargs):
     mode = LaunchConfiguration("mode").perform(context).lower()
     if mode not in ("online", "offline"):
@@ -549,12 +567,21 @@ def launch_setup(context, *args, **kwargs):
         )
         print("Anything you did set is used as is. Turn this off with autodetect:=false.")
         print("=" * 40)
-        final_params = load_sibling("autodetect").autodetect_or_exit(
-            final_params,
-            mode=mode,
-            bag_path=final_params.get("bag_path"),
-            timeout=timeout,
-        )
+        autodetect_module = load_sibling("autodetect")
+        try:
+            final_params = autodetect_module.autodetect(
+                final_params,
+                mode=mode,
+                bag_path=final_params.get("bag_path"),
+                timeout=timeout,
+            )
+        except autodetect_module.AutodetectError as error:
+            hint = f" as {error.param}:=<value>" if error.param else ""
+            lines = ["[ERROR] autodetect failed:", str(error)]
+            if isinstance(error, autodetect_module.AutodetectTimeout):
+                lines.append("Raise autodetect_timeout if the data needs longer to show up.")
+            lines.append(f"Pass the values explicitly{hint}, or set autodetect:=false.")
+            fail(*lines)
 
     print("\n" + "=" * 40 + "\n")
     print("Using Launch configuration:\n")
@@ -575,20 +602,7 @@ def launch_setup(context, *args, **kwargs):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'. Valid: online | offline.")
 
-    nodes = [
-        launch_ros.actions.Node(
-            package="rko_lio",
-            executable=node_executable,
-            parameters=[node_parameters(final_params)],
-            output="screen",
-            arguments=[
-                "--ros-args",
-                "--log-level",
-                LaunchConfiguration("log_level"),
-            ],
-            emulate_tty=True,
-        )
-    ]
+    nodes = [rko_lio_node(final_params, node_executable, LaunchConfiguration("log_level"))]
 
     if rviz_enabled:
         nodes.append(
