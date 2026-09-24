@@ -172,7 +172,7 @@ Without it, ``log_dir``, ``run_name``, and ``dump_deskewed_scans`` have no effec
 
 - **dump_deskewed_scans** (`bool`, default ``False``)
 
-  Save each deskewed scan to disk under ``log_dir`` as PLY. Useful for debugging the deskewing step or for reuse downstream. Off by default since it generates a lot of data.
+  Save each deskewed scan to disk under ``log_dir`` as PLY, in the base frame. Useful for debugging the deskewing step or for reuse downstream. Off by default since it generates a lot of data.
 
 - **log_dir** (`Path`, default ``"results"``)
 
@@ -203,9 +203,9 @@ Mode selection
 
   Path to the bag directory.
 
-- **skip_to_time** (`float`, offline only, default ``0.0``)
+- **skip_first_seconds** (`float`, offline only, default ``0.0``)
 
-  Skip ahead in the bag to this absolute time (seconds) before starting registration.
+  Skip this many seconds from the start of the bag before starting registration.
 
 Topic and frame configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -240,9 +240,9 @@ Publishing toggles
 
   Whether to publish the local map, the topic name, and the republish cadence in seconds.
 
-- **publish_deskewed_scan** (`bool`, default ``false``), **deskewed_scan_topic** (default ``rko_lio/frame``)
+- **publish_deskewed_scan** (`bool`, default ``false``), **deskewed_scan_topic** (default ``rko_lio/deskewed_scan``)
 
-  Whether to publish the deskewed scan, and the topic name.
+  Whether to publish the deskewed scan, and the topic name. The scan is published in ``base_frame``.
 
 - **publish_lidar_acceleration** (`bool`, default ``false``)
 
@@ -279,6 +279,11 @@ Disk dumping and visualization
 - **rviz** (`bool`, default ``false``), **rviz_config_file** (default ``config/default.rviz``)
 
   Launch RViz alongside the odometry. If you leave the rviz config at the default, the launch file patches it with your ``base_frame`` / ``odom_frame`` and enables ``publish_deskewed_scan`` / ``publish_local_map`` so the visualizer has something to show.
+
+- **use_sim_time** (`bool`, default ``false``)
+
+  Take time from the ``/clock`` topic, which is what a bag replayed with ``--clock`` publishes.
+  Offline mode drains the bag itself and does not need it.
 
 - **log_level** (default ``info``)
 
