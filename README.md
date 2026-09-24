@@ -1,3 +1,26 @@
+## rko_lio (jazzy) - 0.4.1-1
+
+The packages in the `rko_lio` repository were released into the `jazzy` distro by running `/home/corven/.local/bin/bloom-release --rosdistro jazzy rko_lio` on `Thu, 24 Sep 2026 22:30:11 -0000`
+
+The `rko_lio` package was released.
+
+Version of package(s) in repository `rko_lio`:
+
+- upstream repository: https://github.com/PRBonn/rko_lio.git
+- release repository: https://github.com/ros2-gbp/rko_lio-release.git
+- rosdistro version: `0.4.0-1`
+- old version: `0.4.0-1`
+- new version: `0.4.1-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.4`
+- catkin_pkg version: `1.1.1`
+- rosdep version: `0.27.0`
+- rosdistro version: `1.1.0`
+- vcstools version: `0.1.42`
+
+
 ## rko_lio (rolling) - 0.4.1-1
 
 The packages in the `rko_lio` repository were released into the `rolling` distro by running `/home/corven/.local/bin/bloom-release --rosdistro rolling rko_lio` on `Thu, 24 Sep 2026 22:28:01 -0000`
