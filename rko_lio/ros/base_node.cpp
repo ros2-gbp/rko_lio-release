@@ -29,6 +29,8 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <optional>
+#include <rclcpp/version.h>
 #include <spdlog/spdlog.h>
 #include <sstream>
 #include <stdexcept>
@@ -82,7 +84,11 @@ BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& opti
   // tf
   invert_odom_tf = node->declare_parameter<bool>("invert_odom_tf", invert_odom_tf);
   tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
-  tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
+#if RCLCPP_VERSION_MAJOR >= 30
+  tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer, *node);
+#else
+  tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer, node);
+#endif
   tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*node);
 
   // publishing
@@ -161,7 +167,7 @@ BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& opti
                          << " ) and acceleration "
                             "estimates to rko_lio/lidar_acceleration. Deskewing is "
                          << (lio->config.deskew ? "enabled" : "disabled") << "."
-                         << (publish_deskewed_scan ? (" Publishing deskewed_cloud to " + deskewed_scan_topic + ".")
+                         << (publish_deskewed_scan ? (" Publishing the deskewed scan to " + deskewed_scan_topic + ".")
                                                    : ""));
 
   reset_on_registration_error =
@@ -171,9 +177,7 @@ BaseNode::BaseNode(const std::string& node_name, const rclcpp::NodeOptions& opti
   dump_results = node->declare_parameter<bool>("dump_results", dump_results);
   results_dir = node->declare_parameter<std::string>("results_dir", results_dir);
   run_name = node->declare_parameter<std::string>("run_name", run_name);
-  rclcpp::on_shutdown([this] {
-    // i'll need to look into rclcpp::Context a bit more, but for now i think this callback should be called before
-    // anything gets destroyed.
+  shutdown_handle = node->get_node_base_interface()->get_context()->add_on_shutdown_callback([this] {
     if (dump_results) {
       // it is probably still a veery good idea to make dump_results_to_disk noexcept
       dump_results_to_disk(results_dir, run_name);
@@ -187,23 +191,14 @@ void BaseNode::parse_cli_extrinsics() {
   const auto parse_extrinsic = [this](const std::string& name, Sophus::SE3s& extrinsic) {
     const std::string param_name = "extrinsic_" + name + "2base_quat_xyzw_xyz";
     const std::vector<double> vec = node->declare_parameter<std::vector<double>>(param_name, std::vector<double>{});
-
-    if (vec.size() != 7) {
-      if (!vec.empty()) {
-        RCLCPP_WARN_STREAM(node->get_logger(),
-                           "Parameter 'extrinsic_"
-                               << name << "2base_quat_xyzw_xyz' is set but has wrong size: " << vec.size()
-                               << ". Expected 7 (qx, qy, qz, qw, x, y, z). check the value: "
-                               << Eigen::Map<const Eigen::VectorXd>(vec.data(), vec.size()).transpose());
-      }
+    if (vec.empty()) {
       return false;
     }
-    const Eigen::Quaternions q = Eigen::Quaterniond(vec.at(3), vec.at(0), vec.at(1), vec.at(2)).cast<core::Scalar>();
-    if (q.norm() < 1e-6) {
-      throw std::invalid_argument(name + " extrinsic quaternion has zero norm (extrinsic_" + name +
-                                  "2base_quat_xyzw_xyz).");
+    try {
+      extrinsic = utils::to_se3(vec);
+    } catch (const core::InputError& error) {
+      throw core::InputError("Parameter '" + param_name + "' is invalid. " + error.what());
     }
-    extrinsic = Sophus::SE3s(q, Eigen::Vector3d(vec.at(4), vec.at(5), vec.at(6)).cast<core::Scalar>());
     RCLCPP_INFO_STREAM(node->get_logger(), "Parsed " << name << " extrinsic as: " << extrinsic.log().transpose());
     return true;
   };
@@ -274,7 +269,7 @@ core::Vector3sVector BaseNode::register_scan_locked(core::Vector3sVector scan, c
 void BaseNode::publish_lidar_outputs(const core::Vector3sVector& deskewed_scan) const {
   if (publish_deskewed_scan) {
     std_msgs::msg::Header header;
-    header.frame_id = lidar_frame;
+    header.frame_id = base_frame;
     header.stamp = utils::to_ros_time(lio->lidar_state.time);
     frame_publisher->publish(utils::eigen_to_point_cloud2(deskewed_scan, header));
   }
@@ -328,15 +323,20 @@ void BaseNode::publish_map_loop() {
       continue;
     }
     const core::Vector3sVector map_points = lio->map.points();
+    const core::Nsec map_time = lio->lidar_state.time;
     lock.unlock(); // we don't access the local map anymore
     std_msgs::msg::Header map_header;
-    map_header.stamp = node->now();
+    map_header.stamp = utils::to_ros_time(map_time);
     map_header.frame_id = odom_frame;
     map_publisher->publish(utils::eigen_to_point_cloud2(map_points, map_header));
   }
 }
 
-BaseNode::~BaseNode() { atomic_node_running = false; }
+BaseNode::~BaseNode() {
+  atomic_node_running = false;
+  // The callback holds `this`; the context outlives the node.
+  node->get_node_base_interface()->get_context()->remove_on_shutdown_callback(shutdown_handle);
+}
 
 void BaseNode::reset_odometry() {
   const bool forced_init_off = lio->config.initialization_phase;
